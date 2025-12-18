@@ -7,6 +7,11 @@ struct Cli {
     path: std::path::PathBuf,
 }
 
+// Helper for tests: extract lines containing a pattern
+fn filter_lines(content: &str, pattern: &str) -> Vec<String> {
+    content.lines().filter(|l| l.contains(pattern)).map(|s| s.to_string()).collect()
+}
+
 fn main() {
 
     let args = Cli::parse();
@@ -26,5 +31,16 @@ fn main() {
         if line.contains(&args.pattern) {
             let _ = writeln!(handle, "{}", line);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_filter_lines_basic() {
+        let content = "alpha\nbeta pattern gamma\npattern in two\nno match";
+        let res = filter_lines(content, "pattern");
+        assert_eq!(res, vec!["beta pattern gamma", "pattern in two"]);
     }
 }
