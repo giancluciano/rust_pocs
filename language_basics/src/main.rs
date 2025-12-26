@@ -85,4 +85,22 @@ fn main() {
         println!("{number}!");
     }
     println!("LIFTOFF!!!");
+
+    // functions
+    fn new_function() {
+        println!("new function");
+    }
+
+    new_function();
+
+    fn another_function(x: i32) {
+        println!("x is: {x}");
+    }
+    another_function(5);
+
+    let y = {
+        let x = 2;
+        x + 1
+    };
+    println!("value of y is: {y}")
 }
