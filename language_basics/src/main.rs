@@ -123,4 +123,12 @@ fn main() {
         [-1, second, third] => println!("second value is = {}, third is = {}", second, third),
         _ => println!("else")
     }
+
+    let number = 13;
+    match number {
+        1 => println!("one"),
+        2..=10 => println!("ten or less"),
+        12 | 13 => println!("12 or 13"),
+        _ => println!("the rest")
+    }
 }
