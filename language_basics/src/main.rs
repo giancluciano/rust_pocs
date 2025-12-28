@@ -102,5 +102,25 @@ fn main() {
         let x = 2;
         x + 1
     };
-    println!("value of y is: {y}")
+    println!("value of y is: {y}");
+
+    // patterns
+    // destruction
+
+    let triple = (-1, 0, 1);
+
+    match triple {
+        (0, y, z) => println!("first one is zero, second is {y}, third is {z}"),
+        (1, ..) => println!("first one is 1"),
+        (.., 2) => println!("last one is two"),
+        (-1, .., 1) => println!("first is -1, last is 1"),
+        _ => println!("else")
+    }
+
+    let array = [-1, 0, 1];
+    
+    match array {
+        [-1, second, third] => println!("second value is = {}, third is = {}", second, third),
+        _ => println!("else")
+    }
 }
