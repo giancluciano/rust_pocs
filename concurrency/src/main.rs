@@ -1,5 +1,17 @@
 use std::thread;
 use std::sync::{mpsc, Mutex, Arc};
+use trpl::Html;
+
+
+
+async fn page_title(url: &str) -> Option<String> {
+    let response = trpl::get(url).await;
+    let response_text = response.text().await;
+    Html::parse(&response_text)
+        .select_first("title")
+        .map(|title| title.inner_html())
+}
+
 
 fn main() {
     // simple thread 
@@ -48,4 +60,12 @@ fn main() {
         handle.join().unwrap();
     }
     println!("Result: {}", *counter.lock().unwrap());
+
+    // futures and async
+
+    trpl::block_on(async {
+        let title = page_title("https://google.com").await.unwrap();
+        println!("title: {title}");
+    })
+
 }
