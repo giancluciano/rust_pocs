@@ -1,0 +1,7 @@
+[package]
+name = "diesel_demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+diesel = { version = "2.3.5", features = ["sqlite", "returning_clauses_for_sqlite_3_35"] }
