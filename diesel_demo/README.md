@@ -50,9 +50,22 @@ sqlite3 diesel_demo/db.sqlite ".schema posts"
 - migrations/2026-01-13-200441-0000_create_posts/up.sql
 - migrations/2026-01-13-200441-0000_create_posts/down.sql
 
-## Notes
-- The app currently prints "Hello, world!" on run. This is a minimal PoC to demonstrate Diesel integration with SQLite and migrations.
-- The migrations directory contains a creation script for `posts`.
 
 ## Cleanup (optional)
 - Remove or reset the `diesel_demo/db.sqlite` file to start fresh.
+
+## Output
+
+```
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/diesel_demo`
+Displaying 2 posts
+New post
+-----------
+
+post body
+New post
+-----------
+
+post body
+```

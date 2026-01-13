@@ -86,6 +86,7 @@ name = "diesel_demo"
 version = "0.1.0"
 dependencies = [
  "diesel",
+ "dotenvy",
 ]
 
 [[package]]
@@ -109,6 +110,12 @@ checksum = "fe2444076b48641147115697648dc743c2c00b61adade0f01ce67133c7babe8c"
 dependencies = [
  "syn",
 ]
+
+[[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downcast-rs"
