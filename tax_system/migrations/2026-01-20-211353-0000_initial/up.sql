@@ -1,0 +1,15 @@
+-- Your SQL goes here
+CREATE TABLE products (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  product_name VARCHAR(100) NOT NULL,
+  product_value INTEGER NOT NULL
+);
+
+CREATE TABLE taxes (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  state_name VARCHAR(100) NOT NULL,
+  year INTEGER NOT NULL,
+  percent INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  FOREIGN KEY(product_id) REFERENCES products(id)
+);

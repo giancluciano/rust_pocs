@@ -1,0 +1,8 @@
+[package]
+name = "tax_system"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+diesel = { version = "2.3.5", features = ["sqlite"] }
+dotenvy = "0.15.7"
