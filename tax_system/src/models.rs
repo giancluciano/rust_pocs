@@ -26,3 +26,13 @@ pub struct Tax {
     pub percent: i32,
     pub product_id: i32,
 }
+
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::taxes)]
+pub struct NewTax<'a> {
+    pub state_name: &'a str,
+    pub year: &'a i32,
+    pub percent: &'a i32,
+    pub product_id: &'a i32,
+}
