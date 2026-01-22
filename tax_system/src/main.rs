@@ -39,6 +39,45 @@ pub fn create_tax(conn: &mut SqliteConnection, state_name: &str, year: &i32, per
         .expect("Error saving new tax")
 }
 
+pub fn get_product(conn: &mut SqliteConnection, product_id: i32) {
+    use crate::schema::products::dsl::*;
+    use crate::schema::taxes::dsl::{taxes, product_id as tax_product_id};
+
+    let product_result = products
+        .filter(id.eq(product_id))
+        .select(Product::as_select())
+        .first(conn)
+        .optional()
+        .expect("Error loading product");
+
+    match product_result {
+        Some(product) => {
+            println!("Product found:");
+            println!("  ID: {}", product.id);
+            println!("  Name: {}", product.product_name);
+            println!("  Value: {}", product.product_value);
+            println!("-----------");
+
+            let tax_results = taxes
+                .filter(tax_product_id.eq(product.id))
+                .select(Tax::as_select())
+                .load(conn)
+                .expect("Error loading taxes");
+
+            if tax_results.is_empty() {
+                println!("No taxes found for this product.");
+            } else {
+                println!("Related taxes ({}):", tax_results.len());
+                for tax in tax_results {
+                    println!("  - State: {}, Year: {}, Percent: {}%", tax.state_name, tax.year, tax.percent);
+                }
+            }
+        }
+        None => {
+            println!("No product found with ID: {}", product_id);
+        }
+    }
+}
 
 fn create_product_and_tax(conn: &mut SqliteConnection) {
     let name = "phone";
@@ -84,4 +123,9 @@ fn main() {
         println!("{} {} {}", tax.state_name, tax.year, tax.percent);
         println!("-----------\n");
     }
+
+    println!("\nGet Product by id");
+    get_product(connection, 1);
+    println!();
+    get_product(connection, 2);
 }
