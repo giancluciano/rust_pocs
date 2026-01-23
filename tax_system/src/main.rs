@@ -1,11 +1,20 @@
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
 use diesel::prelude::*;
 use dotenvy::dotenv;
 use std::env;
+use std::sync::{Arc, Mutex};
 
 pub mod models;
 pub mod schema;
 
 use self::models::*;
+
+type DbPool = Arc<Mutex<SqliteConnection>>;
 
 pub fn establish_connection() -> SqliteConnection {
     dotenv().ok();
@@ -39,44 +48,36 @@ pub fn create_tax(conn: &mut SqliteConnection, state_name: &str, year: &i32, per
         .expect("Error saving new tax")
 }
 
-pub fn get_product(conn: &mut SqliteConnection, product_id: i32) {
+pub fn get_product_by_id(conn: &mut SqliteConnection, product_id: i32) -> Option<Product> {
     use crate::schema::products::dsl::*;
-    use crate::schema::taxes::dsl::{taxes, product_id as tax_product_id};
 
-    let product_result = products
+    products
         .filter(id.eq(product_id))
         .select(Product::as_select())
         .first(conn)
         .optional()
-        .expect("Error loading product");
+        .expect("Error loading product")
+}
 
-    match product_result {
-        Some(product) => {
-            println!("Product found:");
-            println!("  ID: {}", product.id);
-            println!("  Name: {}", product.product_name);
-            println!("  Value: {}", product.product_value);
-            println!("-----------");
-
-            let tax_results = taxes
-                .filter(tax_product_id.eq(product.id))
-                .select(Tax::as_select())
-                .load(conn)
-                .expect("Error loading taxes");
-
-            if tax_results.is_empty() {
-                println!("No taxes found for this product.");
-            } else {
-                println!("Related taxes ({}):", tax_results.len());
-                for tax in tax_results {
-                    println!("  - State: {}, Year: {}, Percent: {}%", tax.state_name, tax.year, tax.percent);
-                }
-            }
-        }
-        None => {
-            println!("No product found with ID: {}", product_id);
-        }
+// API Handlers
+async fn get_product_handler(
+    State(pool): State<DbPool>,
+    Path(product_id): Path<i32>,
+) -> Result<Json<Product>, StatusCode> {
+    let mut conn = pool.lock().unwrap();
+    match get_product_by_id(&mut conn, product_id) {
+        Some(product) => Ok(Json(product)),
+        None => Err(StatusCode::NOT_FOUND),
     }
+}
+
+async fn create_product_handler(
+    State(pool): State<DbPool>,
+    Json(payload): Json<CreateProductRequest>,
+) -> Result<(StatusCode, Json<Product>), StatusCode> {
+    let mut conn = pool.lock().unwrap();
+    let product = create_product(&mut conn, &payload.product_name, &payload.product_value);
+    Ok((StatusCode::CREATED, Json(product)))
 }
 
 fn create_product_and_tax(conn: &mut SqliteConnection) {
@@ -93,39 +94,17 @@ fn create_product_and_tax(conn: &mut SqliteConnection) {
 
     let _ = create_tax(conn, &state, &year_var, &percent_var, &product_id_var);
 }
-fn main() {
-    use self::schema::products::dsl::*;
-    use self::schema::taxes::dsl::*;
-    
-    let connection = &mut establish_connection();
+#[tokio::main]
+async fn main() {
+    let connection = establish_connection();
+    let pool: DbPool = Arc::new(Mutex::new(connection));
 
-    // create_product_and_tax(connection);
-    let results = products
-        .limit(5)
-        .select(Product::as_select())
-        .load(connection)
-        .expect("Error loading products");
+    let app = Router::new()
+        .route("/products/{id}", get(get_product_handler))
+        .route("/products", post(create_product_handler))
+        .with_state(pool);
 
-    let tax_results = taxes
-        .limit(5)
-        .select(Tax::as_select())
-        .load(connection)
-        .expect("Error loading taxes");
-
-    println!("Displaying {} products", results.len());
-    for product in results {
-        println!("{}", product.product_name);
-        println!("-----------\n");
-    }
-
-    println!("Displaying {} taxes", tax_results.len());
-    for tax in tax_results {
-        println!("{} {} {}", tax.state_name, tax.year, tax.percent);
-        println!("-----------\n");
-    }
-
-    println!("\nGet Product by id");
-    get_product(connection, 1);
-    println!();
-    get_product(connection, 2);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("Server running on http://localhost:3000");
+    axum::serve(listener, app).await.unwrap();
 }

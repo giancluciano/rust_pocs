@@ -1,10 +1,17 @@
 use diesel::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Queryable, Selectable)]
+#[derive(Queryable, Selectable, Serialize)]
 #[diesel(table_name = crate::schema::products)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Product {
     pub id: i32,
+    pub product_name: String,
+    pub product_value: i32,
+}
+
+#[derive(Deserialize)]
+pub struct CreateProductRequest {
     pub product_name: String,
     pub product_value: i32,
 }
