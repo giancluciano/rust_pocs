@@ -1,6 +1,8 @@
 [package]
 name = "logistic_system"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+tokio = { version = "1.49", features = ["full"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "migrate"] }
