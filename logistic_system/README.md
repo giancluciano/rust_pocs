@@ -7,3 +7,12 @@ freigth prices
 - size
 - type_transport
 - base_price
+
+
+``` bash
+$ curl -X POST http://localhost:8080/calculate_price \
+    -H "Content-Type: application/json" \
+    -d '{"volume": 2.0, "size": 3.0, "type_transport": "truck"}'
+
+{"price":106.0}
+```

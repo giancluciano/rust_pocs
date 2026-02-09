@@ -7,3 +7,5 @@ CREATE TABLE IF NOT EXISTS freight_price (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+INSERT INTO freight_price (volume, size, type_transport, base_price) VALUES (1.0, 1.0, 'truck', 100.0);
