@@ -15,6 +15,10 @@ struct PriceResponse {
     price: f64,
 }
 
+fn compute_price(base_price: f64, volume: f64, size: f64) -> f64 {
+    base_price + (volume * size)
+}
+
 async fn calculate_price(
     pool: web::Data<SqlitePool>,
     req: web::Json<FreightRequest>,
@@ -28,7 +32,7 @@ async fn calculate_price(
 
     match result {
         Ok(Some(base_price)) => {
-            let price = base_price + (req.volume * req.size);
+            let price = compute_price(base_price, req.volume, req.size);
             HttpResponse::Ok().json(PriceResponse { price })
         }
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
@@ -62,4 +66,15 @@ async fn main() -> std::io::Result<()> {
     .bind("127.0.0.1:8080")?
     .run()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_price() {
+        let price = compute_price(100.0, 2.0, 3.0);
+        assert_eq!(price, 106.0);
+    }
 }
