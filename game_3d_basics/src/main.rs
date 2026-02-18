@@ -150,7 +150,7 @@ fn spawn_text(mut commands: Commands) {
             ..default()
         })
         .with_child(Text::new(concat!(
-            "Move the camera with your mouse.\n",
+            "Move the camera with your mouse. Walk with WASD.\n",
             "Press arrow up to decrease the FOV of the world model.\n",
             "Press arrow down to increase the FOV of the world model."
         )));
@@ -158,9 +158,30 @@ fn spawn_text(mut commands: Commands) {
 
 fn move_player(
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
+    input: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     player: Single<(&mut Transform, &CameraSensitivity), With<Player>>,
 ) {
     let (mut transform, camera_sensitivity) = player.into_inner();
+
+    // WASD movement
+    let mut direction = Vec3::ZERO;
+    if input.pressed(KeyCode::KeyW) {
+        direction += *transform.forward();
+    }
+    if input.pressed(KeyCode::KeyS) {
+        direction += *transform.back();
+    }
+    if input.pressed(KeyCode::KeyA) {
+        direction += *transform.left();
+    }
+    if input.pressed(KeyCode::KeyD) {
+        direction += *transform.right();
+    }
+    if direction != Vec3::ZERO {
+        let speed = 5.0;
+        transform.translation += direction.normalize() * speed * time.delta_secs();
+    }
 
     let delta = accumulated_mouse_motion.delta;
 
