@@ -2,7 +2,9 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::{
     camera::visibility::RenderLayers, color::palettes::tailwind,
+    ecs::message::MessageWriter,
     input::mouse::AccumulatedMouseMotion, light::NotShadowCaster, prelude::*,
+    window::{CursorGrabMode, CursorOptions},
 };
 fn main() {
     App::new()
@@ -14,9 +16,10 @@ fn main() {
                 spawn_world_model,
                 spawn_lights,
                 spawn_text,
+                grab_cursor,
             ),
         )
-        .add_systems(Update, (move_player, change_fov))
+        .add_systems(Update, (move_player, change_fov, handle_escape))
         .run();
 }
 #[derive(Debug, Component)]
@@ -208,6 +211,17 @@ fn move_player(
         let pitch = (pitch + delta_pitch).clamp(-PITCH_LIMIT, PITCH_LIMIT);
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
+    }
+}
+
+fn grab_cursor(mut cursor_options: Single<&mut CursorOptions>) {
+    cursor_options.grab_mode = CursorGrabMode::Locked;
+    cursor_options.visible = false;
+}
+
+fn handle_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
+    if input.just_pressed(KeyCode::Escape) {
+        exit.write(AppExit::Success);
     }
 }
 
