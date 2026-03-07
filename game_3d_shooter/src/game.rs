@@ -21,9 +21,36 @@ pub struct Player;
 #[derive(Component)]
 struct PlayerCamera;
 
-/// Marks procedural body mesh children on the player.
+/// Marks a procedural body segment on the player.
 #[derive(Component)]
-struct PlayerBody;
+struct BodySegment;
+
+/// Which anatomical part this segment represents.
+#[derive(Component, PartialEq, Clone, Copy)]
+enum BodySegmentKind {
+    Head,
+    Neck,
+    Torso,
+    Clavicle,
+    UpperArm,
+    Forearm,
+    Hand,
+    UpperLeg,
+    LowerLeg,
+    Foot,
+}
+
+/// Which side of the body this segment is on.
+#[derive(Component, PartialEq, Clone, Copy)]
+enum BodySide {
+    Left,
+    Right,
+    Center,
+}
+
+/// Marks first-person viewmodel arm segments (children of the camera).
+#[derive(Component)]
+struct ViewmodelArm;
 
 #[derive(Component)]
 pub struct Target;
@@ -49,6 +76,10 @@ impl Default for CameraSensitivity {
 #[derive(Component, Default)]
 struct PlayerPitch(f32);
 
+/// Accumulated walk-cycle phase (radians). Driven by horizontal speed.
+#[derive(Component, Default)]
+struct WalkPhase(f32);
+
 /// First-person or third-person camera view.
 #[derive(Resource, Default, PartialEq, Clone, Copy)]
 enum CameraMode {
@@ -71,6 +102,9 @@ impl Plugin for GamePlugin {
                     move_player,
                     toggle_camera_mode,
                     update_camera,
+                    update_body_visibility,
+                    update_head_pitch,
+                    animate_walk,
                     shoot,
                     handle_escape,
                 )
@@ -87,8 +121,17 @@ fn spawn_world(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let body_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.9, 0.75, 0.6),
+    // Three distinct materials: exposed skin, shirt, and pants
+    let mat_skin = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.90, 0.76, 0.60),
+        ..default()
+    });
+    let mat_shirt = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.22, 0.25, 0.35), // dark navy
+        ..default()
+    });
+    let mat_pants = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.28, 0.22, 0.16), // dark brown
         ..default()
     });
 
@@ -98,6 +141,7 @@ fn spawn_world(
             Player,
             CameraSensitivity::default(),
             PlayerPitch::default(),
+            WalkPhase::default(),
             Transform::from_xyz(0.0, 2.0, 6.0),
             Visibility::default(),
             GameWorld,
@@ -107,63 +151,233 @@ fn spawn_world(
             LinearVelocity::default(),
         ))
         .with_children(|parent| {
-            // Camera at eye level
-            parent.spawn((
-                PlayerCamera,
-                Camera3d::default(),
-                Projection::from(PerspectiveProjection {
-                    fov: 90.0_f32.to_radians(),
-                    ..default()
-                }),
-                Transform::from_xyz(0.0, 0.65, 0.0),
-            ));
+            // ── Camera ────────────────────────────────────────────────────
+            parent
+                .spawn((
+                    PlayerCamera,
+                    Camera3d::default(),
+                    Projection::from(PerspectiveProjection {
+                        fov: 90.0_f32.to_radians(),
+                        near: 0.02, // tight near plane so viewmodel arms don't clip
+                        ..default()
+                    }),
+                    Transform::from_xyz(0.0, 0.65, 0.0),
+                ))
+                .with_children(|cam| {
+                    // Viewmodel: left forearm (camera-space, angled slightly downward)
+                    cam.spawn((
+                        ViewmodelArm,
+                        BodySegmentKind::Forearm,
+                        BodySide::Left,
+                        Mesh3d(meshes.add(Capsule3d::new(0.055, 0.24))),
+                        MeshMaterial3d(mat_skin.clone()),
+                        Transform {
+                            translation: Vec3::new(-0.22, -0.22, -0.38),
+                            rotation: Quat::from_rotation_x(-0.35),
+                            ..default()
+                        },
+                        Visibility::Hidden,
+                    ));
+                    // Viewmodel: left hand
+                    cam.spawn((
+                        ViewmodelArm,
+                        BodySegmentKind::Hand,
+                        BodySide::Left,
+                        Mesh3d(meshes.add(Cuboid::new(0.08, 0.10, 0.04))),
+                        MeshMaterial3d(mat_skin.clone()),
+                        Transform::from_xyz(-0.22, -0.32, -0.28),
+                        Visibility::Hidden,
+                    ));
+                    // Viewmodel: right forearm
+                    cam.spawn((
+                        ViewmodelArm,
+                        BodySegmentKind::Forearm,
+                        BodySide::Right,
+                        Mesh3d(meshes.add(Capsule3d::new(0.055, 0.24))),
+                        MeshMaterial3d(mat_skin.clone()),
+                        Transform {
+                            translation: Vec3::new(0.22, -0.22, -0.38),
+                            rotation: Quat::from_rotation_x(-0.35),
+                            ..default()
+                        },
+                        Visibility::Hidden,
+                    ));
+                    // Viewmodel: right hand
+                    cam.spawn((
+                        ViewmodelArm,
+                        BodySegmentKind::Hand,
+                        BodySide::Right,
+                        Mesh3d(meshes.add(Cuboid::new(0.08, 0.10, 0.04))),
+                        MeshMaterial3d(mat_skin.clone()),
+                        Transform::from_xyz(0.22, -0.32, -0.28),
+                        Visibility::Hidden,
+                    ));
+                });
+
+            // ── Full body segments ─────────────────────────────────────────
+            // Physics capsule: Capsule3d::new(0.4, 1.0) — total height 1.8m,
+            // bottom at y = -0.9 from entity origin.
 
             // Head
             parent.spawn((
-                PlayerBody,
-                Mesh3d(meshes.add(Sphere::new(0.22))),
-                MeshMaterial3d(body_mat.clone()),
-                Transform::from_xyz(0.0, 0.75, 0.0),
+                BodySegment,
+                BodySegmentKind::Head,
+                BodySide::Center,
+                Mesh3d(meshes.add(Sphere::new(0.13))),
+                MeshMaterial3d(mat_skin.clone()),
+                Transform::from_xyz(0.0, 0.76, 0.0),
             ));
-
+            // Neck
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Neck,
+                BodySide::Center,
+                Mesh3d(meshes.add(Capsule3d::new(0.06, 0.08))),
+                MeshMaterial3d(mat_skin.clone()),
+                Transform::from_xyz(0.0, 0.59, 0.0),
+            ));
             // Torso
             parent.spawn((
-                PlayerBody,
-                Mesh3d(meshes.add(Cuboid::new(0.5, 0.6, 0.25))),
-                MeshMaterial3d(body_mat.clone()),
-                Transform::from_xyz(0.0, 0.15, 0.0),
+                BodySegment,
+                BodySegmentKind::Torso,
+                BodySide::Center,
+                Mesh3d(meshes.add(Cuboid::new(0.42, 0.52, 0.22))),
+                MeshMaterial3d(mat_shirt.clone()),
+                Transform::from_xyz(0.0, 0.22, 0.0),
             ));
-
-            // Left Arm
+            // Left clavicle (horizontal bar connecting torso to shoulder)
             parent.spawn((
-                PlayerBody,
-                Mesh3d(meshes.add(Capsule3d::new(0.09, 0.45))),
-                MeshMaterial3d(body_mat.clone()),
-                Transform::from_xyz(-0.38, 0.15, 0.0),
+                BodySegment,
+                BodySegmentKind::Clavicle,
+                BodySide::Left,
+                Mesh3d(meshes.add(Capsule3d::new(0.055, 0.16))),
+                MeshMaterial3d(mat_shirt.clone()),
+                Transform {
+                    translation: Vec3::new(-0.28, 0.42, 0.0),
+                    rotation: Quat::from_rotation_z(FRAC_PI_2),
+                    ..default()
+                },
             ));
-
-            // Right Arm
+            // Right clavicle
             parent.spawn((
-                PlayerBody,
-                Mesh3d(meshes.add(Capsule3d::new(0.09, 0.45))),
-                MeshMaterial3d(body_mat.clone()),
-                Transform::from_xyz(0.38, 0.15, 0.0),
+                BodySegment,
+                BodySegmentKind::Clavicle,
+                BodySide::Right,
+                Mesh3d(meshes.add(Capsule3d::new(0.055, 0.16))),
+                MeshMaterial3d(mat_shirt.clone()),
+                Transform {
+                    translation: Vec3::new(0.28, 0.42, 0.0),
+                    rotation: Quat::from_rotation_z(FRAC_PI_2),
+                    ..default()
+                },
             ));
-
-            // Left Leg
+            // Left upper arm
             parent.spawn((
-                PlayerBody,
-                Mesh3d(meshes.add(Capsule3d::new(0.1, 0.5))),
-                MeshMaterial3d(body_mat.clone()),
-                Transform::from_xyz(-0.15, -0.55, 0.0),
+                BodySegment,
+                BodySegmentKind::UpperArm,
+                BodySide::Left,
+                Mesh3d(meshes.add(Capsule3d::new(0.07, 0.28))),
+                MeshMaterial3d(mat_shirt.clone()),
+                Transform::from_xyz(-0.37, 0.20, 0.0),
             ));
-
-            // Right Leg
+            // Right upper arm
             parent.spawn((
-                PlayerBody,
-                Mesh3d(meshes.add(Capsule3d::new(0.1, 0.5))),
-                MeshMaterial3d(body_mat.clone()),
-                Transform::from_xyz(0.15, -0.55, 0.0),
+                BodySegment,
+                BodySegmentKind::UpperArm,
+                BodySide::Right,
+                Mesh3d(meshes.add(Capsule3d::new(0.07, 0.28))),
+                MeshMaterial3d(mat_shirt.clone()),
+                Transform::from_xyz(0.37, 0.20, 0.0),
+            ));
+            // Left forearm (skin — short sleeve shirt)
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Forearm,
+                BodySide::Left,
+                Mesh3d(meshes.add(Capsule3d::new(0.055, 0.24))),
+                MeshMaterial3d(mat_skin.clone()),
+                Transform::from_xyz(-0.37, -0.10, 0.0),
+            ));
+            // Right forearm
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Forearm,
+                BodySide::Right,
+                Mesh3d(meshes.add(Capsule3d::new(0.055, 0.24))),
+                MeshMaterial3d(mat_skin.clone()),
+                Transform::from_xyz(0.37, -0.10, 0.0),
+            ));
+            // Left hand
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Hand,
+                BodySide::Left,
+                Mesh3d(meshes.add(Cuboid::new(0.08, 0.10, 0.04))),
+                MeshMaterial3d(mat_skin.clone()),
+                Transform::from_xyz(-0.37, -0.30, 0.0),
+            ));
+            // Right hand
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Hand,
+                BodySide::Right,
+                Mesh3d(meshes.add(Cuboid::new(0.08, 0.10, 0.04))),
+                MeshMaterial3d(mat_skin.clone()),
+                Transform::from_xyz(0.37, -0.30, 0.0),
+            ));
+            // Left upper leg
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::UpperLeg,
+                BodySide::Left,
+                Mesh3d(meshes.add(Capsule3d::new(0.09, 0.30))),
+                MeshMaterial3d(mat_pants.clone()),
+                Transform::from_xyz(-0.13, -0.46, 0.0),
+            ));
+            // Right upper leg
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::UpperLeg,
+                BodySide::Right,
+                Mesh3d(meshes.add(Capsule3d::new(0.09, 0.30))),
+                MeshMaterial3d(mat_pants.clone()),
+                Transform::from_xyz(0.13, -0.46, 0.0),
+            ));
+            // Left lower leg
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::LowerLeg,
+                BodySide::Left,
+                Mesh3d(meshes.add(Capsule3d::new(0.075, 0.28))),
+                MeshMaterial3d(mat_pants.clone()),
+                Transform::from_xyz(-0.13, -0.80, 0.0),
+            ));
+            // Right lower leg
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::LowerLeg,
+                BodySide::Right,
+                Mesh3d(meshes.add(Capsule3d::new(0.075, 0.28))),
+                MeshMaterial3d(mat_pants.clone()),
+                Transform::from_xyz(0.13, -0.80, 0.0),
+            ));
+            // Left foot
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Foot,
+                BodySide::Left,
+                Mesh3d(meshes.add(Cuboid::new(0.09, 0.06, 0.18))),
+                MeshMaterial3d(mat_pants.clone()),
+                Transform::from_xyz(-0.13, -0.95, -0.04),
+            ));
+            // Right foot
+            parent.spawn((
+                BodySegment,
+                BodySegmentKind::Foot,
+                BodySide::Right,
+                Mesh3d(meshes.add(Cuboid::new(0.09, 0.06, 0.18))),
+                MeshMaterial3d(mat_pants.clone()),
+                Transform::from_xyz(0.13, -0.95, -0.04),
             ));
         });
 
@@ -413,6 +627,108 @@ fn update_camera(
             let pos = Vec3::new(0.0, y, z);
             *cam_tf = Transform::from_translation(pos)
                 .looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y);
+        }
+    }
+}
+
+// ── Body visibility (FP/TP toggle) ─────────────────────────────────────────
+
+fn update_body_visibility(
+    mode: Res<CameraMode>,
+    mut body_query: Query<&mut Visibility, With<BodySegment>>,
+    mut viewmodel_query: Query<&mut Visibility, With<ViewmodelArm>>,
+) {
+    let (body_vis, viewmodel_vis) = match *mode {
+        CameraMode::FirstPerson => (Visibility::Hidden, Visibility::Inherited),
+        CameraMode::ThirdPerson => (Visibility::Inherited, Visibility::Hidden),
+    };
+    for mut vis in &mut body_query {
+        *vis = body_vis;
+    }
+    for mut vis in &mut viewmodel_query {
+        *vis = viewmodel_vis;
+    }
+}
+
+// ── Head pitch tracking (third-person only) ─────────────────────────────────
+
+fn update_head_pitch(
+    mode: Res<CameraMode>,
+    player: Single<&PlayerPitch, With<Player>>,
+    mut segments: Query<(&mut Transform, &BodySegmentKind), With<BodySegment>>,
+) {
+    let pitch = player.0;
+    for (mut tf, kind) in &mut segments {
+        match kind {
+            BodySegmentKind::Neck => {
+                tf.rotation = if *mode == CameraMode::ThirdPerson {
+                    Quat::from_rotation_x(pitch * 0.4)
+                } else {
+                    Quat::IDENTITY
+                };
+            }
+            BodySegmentKind::Head => {
+                tf.rotation = if *mode == CameraMode::ThirdPerson {
+                    Quat::from_rotation_x(pitch * 0.6)
+                } else {
+                    Quat::IDENTITY
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
+// ── Procedural walk animation ────────────────────────────────────────────────
+
+fn animate_walk(
+    time: Res<Time>,
+    player_query: Single<(&LinearVelocity, &mut WalkPhase), With<Player>>,
+    mut segments: Query<(&mut Transform, &BodySegmentKind, &BodySide), With<BodySegment>>,
+) {
+    #[allow(unused_mut)]
+    let (velocity, mut walk_phase) = player_query.into_inner();
+    let speed_xz = Vec2::new(velocity.x, velocity.z).length();
+    let dt = time.delta_secs();
+
+    if speed_xz > 0.1 {
+        // Advance phase proportional to horizontal speed
+        walk_phase.0 += speed_xz * dt * 3.5;
+    } else {
+        // Smoothly decay phase back to 0 so limbs return to neutral
+        walk_phase.0 = walk_phase.0 * (1.0 - dt * 8.0);
+        if walk_phase.0.abs() < 0.001 {
+            walk_phase.0 = 0.0;
+        }
+    }
+
+    let phase = walk_phase.0;
+
+    for (mut tf, kind, side) in &mut segments {
+        match kind {
+            BodySegmentKind::UpperArm => {
+                let swing = match side {
+                    BodySide::Left => phase.sin() * 0.45,
+                    BodySide::Right => -phase.sin() * 0.45,
+                    BodySide::Center => 0.0,
+                };
+                tf.rotation = Quat::from_rotation_x(swing);
+            }
+            BodySegmentKind::UpperLeg => {
+                let swing = match side {
+                    BodySide::Left => -phase.sin() * 0.5,
+                    BodySide::Right => phase.sin() * 0.5,
+                    BodySide::Center => 0.0,
+                };
+                tf.rotation = Quat::from_rotation_x(swing);
+            }
+            BodySegmentKind::LowerLeg => {
+                // Knee bends symmetrically: always slightly bent during motion,
+                // more on the back-swing. abs() gives a natural gait.
+                let bend = (phase + 0.6).sin().abs() * 0.3;
+                tf.rotation = Quat::from_rotation_x(bend);
+            }
+            _ => {}
         }
     }
 }
