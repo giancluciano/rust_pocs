@@ -635,17 +635,19 @@ fn update_camera(
 
 fn update_body_visibility(
     mode: Res<CameraMode>,
-    mut body_query: Query<&mut Visibility, With<BodySegment>>,
-    mut viewmodel_query: Query<&mut Visibility, With<ViewmodelArm>>,
+    mut queries: ParamSet<(
+        Query<&mut Visibility, With<BodySegment>>,
+        Query<&mut Visibility, With<ViewmodelArm>>,
+    )>,
 ) {
     let (body_vis, viewmodel_vis) = match *mode {
         CameraMode::FirstPerson => (Visibility::Hidden, Visibility::Inherited),
         CameraMode::ThirdPerson => (Visibility::Inherited, Visibility::Hidden),
     };
-    for mut vis in &mut body_query {
+    for mut vis in &mut queries.p0() {
         *vis = body_vis;
     }
-    for mut vis in &mut viewmodel_query {
+    for mut vis in &mut queries.p1() {
         *vis = viewmodel_vis;
     }
 }
