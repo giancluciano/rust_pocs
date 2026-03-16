@@ -44,22 +44,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request};
+    use axum::{body::Body, http::{Request, StatusCode, Method}};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    #[tokio::test]
-    async fn test_hello_world_endpoint() {
-        let app = Router::new().route("/", get(hello_world));
+    fn build_app() -> Router {
+        Router::new().route("/", get(hello_world))
+    }
 
-        let response = app
+    #[tokio::test]
+    async fn test_hello_world_status_and_body() {
+        let response = build_app()
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200);
+        assert_eq!(response.status(), StatusCode::OK);
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..], b"Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn test_hello_world_content_type_is_text() {
+        let response = build_app()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        assert!(content_type.contains("text/plain"), "expected text/plain, got: {content_type}");
+    }
+
+    #[tokio::test]
+    async fn test_unknown_route_returns_404() {
+        let response = build_app()
+            .oneshot(Request::builder().uri("/unknown").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_post_to_root_returns_405() {
+        let response = build_app()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 }
