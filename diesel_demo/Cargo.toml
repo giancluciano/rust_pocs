@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 diesel = { version = "2.3.5", features = ["sqlite", "returning_clauses_for_sqlite_3_35"] }
 dotenvy = "0.15"
+
+[dev-dependencies]
+diesel_migrations = { version = "2.3.0", features = ["sqlite"] }
