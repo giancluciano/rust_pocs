@@ -6,6 +6,79 @@ use diesel::prelude::*;
 use dotenvy::dotenv;
 use std::env;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+
+    const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+
+    fn setup_test_db() -> SqliteConnection {
+        let mut conn = SqliteConnection::establish(":memory:")
+            .expect("Failed to create in-memory SQLite database");
+        conn.run_pending_migrations(MIGRATIONS)
+            .expect("Failed to run migrations");
+        conn
+    }
+
+    #[test]
+    fn test_create_post_returns_post_with_correct_fields() {
+        let conn = &mut setup_test_db();
+        let post = create_post(conn, "Test Title", "Test Body");
+        assert_eq!(post.title, "Test Title");
+        assert_eq!(post.body, "Test Body");
+        assert!(!post.published);
+    }
+
+    #[test]
+    fn test_create_post_assigns_id() {
+        let conn = &mut setup_test_db();
+        let post = create_post(conn, "Another Post", "Some body");
+        assert!(post.id > 0);
+    }
+
+    #[test]
+    fn test_create_multiple_posts_have_unique_ids() {
+        let conn = &mut setup_test_db();
+        let post1 = create_post(conn, "Post 1", "Body 1");
+        let post2 = create_post(conn, "Post 2", "Body 2");
+        assert_ne!(post1.id, post2.id);
+    }
+
+    #[test]
+    fn test_created_post_is_persisted_in_db() {
+        use crate::schema::posts::dsl::*;
+
+        let conn = &mut setup_test_db();
+        create_post(conn, "Persisted Post", "Persisted Body");
+
+        let results = posts
+            .select(Post::as_select())
+            .load(conn)
+            .expect("Error loading posts");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Persisted Post");
+    }
+
+    #[test]
+    fn test_filter_by_published_false() {
+        use crate::schema::posts::dsl::*;
+
+        let conn = &mut setup_test_db();
+        create_post(conn, "Unpublished", "body");
+
+        let results = posts
+            .filter(published.eq(false))
+            .select(Post::as_select())
+            .load(conn)
+            .expect("Error loading posts");
+
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].published);
+    }
+}
+
 pub fn establish_connection() -> SqliteConnection {
     dotenv().ok();
 
