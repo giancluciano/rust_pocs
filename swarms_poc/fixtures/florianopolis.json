@@ -1,0 +1,195 @@
+{
+  "destination": {
+    "city": "Florianópolis",
+    "country": "Brazil",
+    "center": { "lat": -27.5969, "lon": -48.5495 },
+    "beaches": [
+      { "name": "Jurerê Internacional", "location": { "lat": -27.4390, "lon": -48.4930 } },
+      { "name": "Canasvieiras", "location": { "lat": -27.4270, "lon": -48.4600 } },
+      { "name": "Ingleses", "location": { "lat": -27.4340, "lon": -48.3950 } },
+      { "name": "Barra da Lagoa", "location": { "lat": -27.5740, "lon": -48.4215 } },
+      { "name": "Praia Mole", "location": { "lat": -27.6020, "lon": -48.4330 } },
+      { "name": "Joaquina", "location": { "lat": -27.6290, "lon": -48.4470 } },
+      { "name": "Campeche", "location": { "lat": -27.6800, "lon": -48.4770 } }
+    ]
+  },
+  "listings": [
+    {
+      "id": "fx-001",
+      "name": "Jurerê mansion - 8 suites, private pool",
+      "url": "https://example.com/fixture/fx-001",
+      "location": { "lat": -27.4415, "lon": -48.4960 },
+      "max_guests": 20, "bedrooms": 8, "beds": 14, "bathrooms": 8.5,
+      "price_per_night": 4200, "currency": "BRL",
+      "rating": 4.92, "review_count": 64,
+      "amenities": ["Private pool", "Wifi", "Kitchen", "BBQ grill", "Free parking", "Air conditioning"],
+      "description": "Eight en-suite bedrooms (6 doubles with an extra single each, 2 twin rooms). Private heated pool, gourmet area, 350 m walk to Jurerê beach. Quiet hours after 22h."
+    },
+    {
+      "id": "fx-002",
+      "name": "Lagoa lakeside lodge - sleeps 22",
+      "url": "https://example.com/fixture/fx-002",
+      "location": { "lat": -27.6010, "lon": -48.4700 },
+      "max_guests": 22, "bedrooms": 6, "beds": 9, "bathrooms": 4,
+      "price_per_night": 2600, "currency": "BRL",
+      "rating": 4.61, "review_count": 38,
+      "amenities": ["Wifi", "Kitchen", "Lake access", "Kayaks", "BBQ grill"],
+      "description": "Rustic lodge on the Lagoa da Conceição. 6 bedrooms with 9 beds (mostly doubles) plus 6 floor mattresses available on request for extra guests. No pool, but private deck on the lagoon."
+    },
+    {
+      "id": "fx-003",
+      "name": "Centro whole-floor loft, hostel style",
+      "url": "https://example.com/fixture/fx-003",
+      "location": { "lat": -27.5950, "lon": -48.5480 },
+      "max_guests": 16, "bedrooms": 6, "beds": 10, "bathrooms": 3,
+      "price_per_night": 1800, "currency": "BRL",
+      "rating": 4.70, "review_count": 112,
+      "amenities": ["Wifi", "Kitchen", "Washer", "Elevator"],
+      "description": "Entire floor in a historic building near Praça XV. Bunk-bed rooms, shared bathrooms. Great for nightlife, 20+ min drive to beaches."
+    },
+    {
+      "id": "fx-004",
+      "name": "Campeche beach villa with heated pool",
+      "url": "https://example.com/fixture/fx-004",
+      "location": { "lat": -27.6790, "lon": -48.4810 },
+      "max_guests": 20, "bedrooms": 7, "beds": 12, "bathrooms": 6,
+      "price_per_night": 3500, "currency": "BRL",
+      "rating": 4.85, "review_count": 51,
+      "amenities": ["Pool", "Wifi", "Kitchen", "Free parking", "Beach access"],
+      "description": "Villa inside a gated condominium, 200 m from Campeche beach. 7 bedrooms, 12 beds; 2 guests sleep on a sofa-bed in the living room. The heated pool is shared with the other 4 condominium houses. No parties."
+    },
+    {
+      "id": "fx-005",
+      "name": "Ingleses beachfront house A",
+      "url": "https://example.com/fixture/fx-005",
+      "location": { "lat": -27.4352, "lon": -48.3975 },
+      "max_guests": 10, "bedrooms": 4, "beds": 6, "bathrooms": 3,
+      "price_per_night": 1300, "currency": "BRL",
+      "rating": 4.88, "review_count": 90,
+      "amenities": ["Private pool", "Wifi", "Kitchen", "Beachfront", "BBQ grill"],
+      "description": "Beachfront house with private pool. 4 bedrooms: 4 doubles + 2 singles. Same owner rents house B next door."
+    },
+    {
+      "id": "fx-006",
+      "name": "Ingleses beachfront house B",
+      "url": "https://example.com/fixture/fx-006",
+      "location": { "lat": -27.4360, "lon": -48.3985 },
+      "max_guests": 10, "bedrooms": 4, "beds": 6, "bathrooms": 3,
+      "price_per_night": 1250, "currency": "BRL",
+      "rating": 4.80, "review_count": 74,
+      "amenities": ["Wifi", "Kitchen", "Beachfront", "BBQ grill"],
+      "description": "Twin of house A (next door), no pool. 4 doubles + 2 singles."
+    },
+    {
+      "id": "fx-007",
+      "name": "Ingleses condo 3BR",
+      "url": "https://example.com/fixture/fx-007",
+      "location": { "lat": -27.4380, "lon": -48.3990 },
+      "max_guests": 8, "bedrooms": 3, "beds": 4, "bathrooms": 2,
+      "price_per_night": 900, "currency": "BRL",
+      "rating": 4.55, "review_count": 40,
+      "amenities": ["Shared pool", "Wifi", "Kitchen", "Gym"],
+      "description": "Apartment in a resort-style condo, 300 m to the beach. 3 bedrooms (3 doubles) + 2 guests on a living-room sofa-bed."
+    },
+    {
+      "id": "fx-008",
+      "name": "Canasvieiras family house with pool",
+      "url": "https://example.com/fixture/fx-008",
+      "location": { "lat": -27.4295, "lon": -48.4610 },
+      "max_guests": 12, "bedrooms": 5, "beds": 8, "bathrooms": 4,
+      "price_per_night": 1500, "currency": "BRL",
+      "rating": 4.75, "review_count": 58,
+      "amenities": ["Private pool", "Wifi", "Kitchen", "Free parking"],
+      "description": "5 bedrooms (4 doubles, 1 room with 4 singles). Private pool, 250 m to Canasvieiras beach."
+    },
+    {
+      "id": "fx-009",
+      "name": "Canasvieiras apartment near the beach",
+      "url": "https://example.com/fixture/fx-009",
+      "location": { "lat": -27.4300, "lon": -48.4625 },
+      "max_guests": 8, "bedrooms": 3, "beds": 5, "bathrooms": 2,
+      "price_per_night": 800, "currency": "BRL",
+      "rating": 4.40, "review_count": 22,
+      "amenities": ["Pool", "Wifi", "Kitchen"],
+      "description": "3 bedrooms, 5 beds. Building pool on the rooftop. 4th floor, no elevator."
+    },
+    {
+      "id": "fx-010",
+      "name": "Canasvieiras townhouse",
+      "url": "https://example.com/fixture/fx-010",
+      "location": { "lat": -27.4320, "lon": -48.4650 },
+      "max_guests": 10, "bedrooms": 4, "beds": 6, "bathrooms": 3,
+      "price_per_night": 1100, "currency": "BRL",
+      "rating": 4.60, "review_count": 31,
+      "amenities": ["Wifi", "Kitchen", "Free parking"],
+      "description": "Townhouse, 4 bedrooms with 4 doubles and 2 singles, 600 m from the beach."
+    },
+    {
+      "id": "fx-011",
+      "name": "Barra da Lagoa surf house",
+      "url": "https://example.com/fixture/fx-011",
+      "location": { "lat": -27.5745, "lon": -48.4240 },
+      "max_guests": 12, "bedrooms": 5, "beds": 7, "bathrooms": 3,
+      "price_per_night": 1000, "currency": "BRL",
+      "rating": 4.50, "review_count": 67,
+      "amenities": ["Wifi", "Kitchen", "Surfboard storage"],
+      "description": "Laid-back surf house 100 m from the beach. 5 rooms: 5 doubles + 2 hammocks on the veranda."
+    },
+    {
+      "id": "fx-012",
+      "name": "Barra da Lagoa garden house with pool",
+      "url": "https://example.com/fixture/fx-012",
+      "location": { "lat": -27.5760, "lon": -48.4255 },
+      "max_guests": 10, "bedrooms": 4, "beds": 6, "bathrooms": 3,
+      "price_per_night": 950, "currency": "BRL",
+      "rating": 4.72, "review_count": 45,
+      "amenities": ["Private pool", "Wifi", "Kitchen", "Garden"],
+      "description": "4 bedrooms (4 doubles + 2 singles) in a big garden with small private pool, 250 m from the beach."
+    },
+    {
+      "id": "fx-013",
+      "name": "Centro apartment 4BR",
+      "url": "https://example.com/fixture/fx-013",
+      "location": { "lat": -27.5975, "lon": -48.5500 },
+      "max_guests": 10, "bedrooms": 4, "beds": 6, "bathrooms": 2,
+      "price_per_night": 700, "currency": "BRL",
+      "rating": 4.30, "review_count": 19,
+      "amenities": ["Wifi", "Kitchen", "Elevator"],
+      "description": "Central apartment by the market. 4 doubles + 2 singles. Street noise on weekends."
+    },
+    {
+      "id": "fx-014",
+      "name": "Centro penthouse with rooftop pool",
+      "url": "https://example.com/fixture/fx-014",
+      "location": { "lat": -27.5985, "lon": -48.5470 },
+      "max_guests": 10, "bedrooms": 4, "beds": 6, "bathrooms": 3,
+      "price_per_night": 750, "currency": "BRL",
+      "rating": 4.65, "review_count": 28,
+      "amenities": ["Private pool", "Wifi", "Kitchen", "Elevator"],
+      "description": "Penthouse with a small private rooftop pool. 4 doubles + 2 singles.",
+      "booked": [{ "from": "2027-01-12", "to": "2027-01-15" }]
+    },
+    {
+      "id": "fx-015",
+      "name": "Joaquina dunes house",
+      "url": "https://example.com/fixture/fx-015",
+      "location": { "lat": -27.6280, "lon": -48.4500 },
+      "max_guests": 14, "bedrooms": 6, "beds": 9, "bathrooms": 4,
+      "price_per_night": 1700, "currency": "BRL",
+      "rating": 4.83, "review_count": 36,
+      "amenities": ["Private pool", "Wifi", "Kitchen", "Sauna"],
+      "description": "6 bedrooms (5 doubles + 1 room with 4 singles). Private pool facing the dunes, 400 m to Joaquina."
+    },
+    {
+      "id": "fx-016",
+      "name": "Joaquina cabin",
+      "url": "https://example.com/fixture/fx-016",
+      "location": { "lat": -27.6300, "lon": -48.4520 },
+      "max_guests": 6, "bedrooms": 2, "beds": 3, "bathrooms": 1,
+      "price_per_night": 600, "currency": "BRL",
+      "rating": 4.45, "review_count": 25,
+      "amenities": ["Wifi", "Kitchen"],
+      "description": "Cozy cabin, 2 doubles + 1 double sofa-bed. Short walk from the Joaquina dunes house."
+    }
+  ]
+}
