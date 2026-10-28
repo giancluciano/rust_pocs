@@ -46,6 +46,8 @@ pub struct PoliteConfig {
     /// Returns true if a 200 response is actually a block/captcha page.
     pub block_detector: fn(&str) -> bool,
     pub cache: Option<DiskCache>,
+    /// Custom redirect policy (e.g. to vet every hop); reqwest's default if `None`.
+    pub redirect: Option<reqwest::redirect::Policy>,
 }
 
 impl PoliteConfig {
@@ -67,6 +69,7 @@ impl PoliteConfig {
             warmup_url: None,
             block_detector: |_| false,
             cache: None,
+            redirect: None,
         }
     }
 }
@@ -81,13 +84,17 @@ pub struct PoliteClient {
 }
 
 impl PoliteClient {
-    pub fn new(config: PoliteConfig) -> Result<Self, HttpError> {
-        let client = reqwest::Client::builder()
+    pub fn new(mut config: PoliteConfig) -> Result<Self, HttpError> {
+        let mut builder = reqwest::Client::builder()
             .default_headers(config.headers.clone())
             .cookie_store(true)
             .gzip(true)
             .brotli(true)
-            .timeout(config.timeout)
+            .timeout(config.timeout);
+        if let Some(policy) = config.redirect.take() {
+            builder = builder.redirect(policy);
+        }
+        let client = builder
             .build()
             .map_err(|e| HttpError::Network(e.to_string()))?;
         Ok(Self {
