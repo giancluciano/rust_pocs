@@ -7,7 +7,7 @@ use crate::domain::{
     CandidateCity, CityPlan, FireworksEvidence, Listing, StayPick, TripRequest,
 };
 
-/// Used when the report is built before `curation_brief` told us the real value.
+/// Used when the report is built before `set_group` told us the real value.
 const DEFAULT_PER_CITY: usize = 5;
 const BRIEF_DESCRIPTION_CHARS: usize = 200;
 const RESEARCH_UNFINISHED: &str =
@@ -27,7 +27,8 @@ struct PlanState {
     listings: HashMap<String, Vec<Listing>>,
     picks: HashMap<String, Vec<StayPick>>,
     notes: HashMap<String, String>,
-    /// Remembered from `curation_brief`; the tools and the fallback need them.
+    airbnb_errors: HashMap<String, String>,
+    /// Set by `set_group`; the curation tools and the report's fallback need them.
     people: u32,
     per_city: usize,
 }
@@ -180,6 +181,26 @@ impl SharedState {
         self.lock().listings.insert(city_key(city), listings);
     }
 
+    /// The Airbnb search for `city` failed: it stays in the report, which says why.
+    pub fn set_airbnb_failure(&self, city: &str, error: String) {
+        tracing::warn!(city, error = %error, "Airbnb search failed");
+        let mut state = self.lock();
+        state.listings.insert(city_key(city), Vec::new());
+        state.airbnb_errors.insert(city_key(city), error);
+    }
+
+    /// True if at least one city has a listing to curate.
+    pub fn has_listings(&self) -> bool {
+        self.lock().listings.values().any(|l| !l.is_empty())
+    }
+
+    /// Group size and stays per city, for the curation tools and the report's fallback.
+    pub fn set_group(&self, people: u32, per_city: usize) {
+        let mut state = self.lock();
+        state.people = people;
+        state.per_city = per_city;
+    }
+
     pub fn listings_for(&self, city: &str) -> Option<Vec<Listing>> {
         self.lock().listings.get(&city_key(city)).cloned()
     }
@@ -221,7 +242,7 @@ impl SharedState {
             .collect()
     }
 
-    /// Group size remembered from `curation_brief` (0 before it ran).
+    /// Group size from `set_group` (0 before it was called).
     pub fn people(&self) -> u32 {
         self.lock().people
     }
@@ -234,9 +255,7 @@ impl SharedState {
     /// Text handed to the curator: per city, the candidate listings (id, price
     /// per person per night, capacity, rooms, rating, pool, short description).
     pub fn curation_brief(&self, request: &TripRequest, per_city: usize) -> String {
-        let mut state = self.lock();
-        state.people = request.people;
-        state.per_city = per_city;
+        let state = self.lock();
         let header = brief_header(request, per_city);
         let sections: Vec<String> = state
             .listed_cities()
@@ -261,6 +280,7 @@ impl SharedState {
                     fireworks: state.evidence_or_missing(c),
                     notes: state.notes.get(&key).cloned(),
                     stays: state.stays(&key),
+                    airbnb_error: state.airbnb_errors.get(&key).cloned(),
                 }
             })
             .collect()
@@ -469,7 +489,7 @@ mod tests {
                 listing("big-mid", 500.0, 10),
             ],
         );
-        let _ = state.curation_brief(&request(8), 2);
+        state.set_group(8, 2);
 
         let stays = state.plans().remove(0).stays;
         let ids: Vec<&str> = stays.iter().map(|(l, _)| l.id.as_str()).collect();

@@ -244,6 +244,7 @@ fn test_search(server: &MockServer, dir: &Path, max_pages: u32, max_details: u32
         max_jitter: Duration::ZERO,
     };
     let config = AirbnbConfig {
+        max_cities: 12,
         max_pages,
         max_listing_details: max_details,
         min_interval: Duration::ZERO,
@@ -427,6 +428,7 @@ fn new_enforces_the_one_second_floor_and_creates_cache_dirs() {
     let dir = tempfile::tempdir().unwrap();
     let search = AirbnbSearch::new(
         AirbnbConfig {
+            max_cities: 12,
             max_pages: 2,
             max_listing_details: 6,
             min_interval: Duration::from_millis(10),

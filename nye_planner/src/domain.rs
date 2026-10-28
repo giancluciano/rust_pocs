@@ -139,6 +139,8 @@ pub struct CityPlan {
     pub notes: Option<String>,
     /// Picked listings in the curator's order, each with its reason.
     pub stays: Vec<(Listing, String)>,
+    /// Why the Airbnb search for this city failed, if it did.
+    pub airbnb_error: Option<String>,
 }
 
 #[cfg(test)]

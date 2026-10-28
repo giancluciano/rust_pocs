@@ -336,7 +336,7 @@ mod tests {
             people: 8,
             stay: Stay::new(d("2026-12-30"), d("2027-01-02")).unwrap(),
         };
-        let _ = state.curation_brief(&request, 2);
+        state.set_group(request.people, 2);
         state
     }
 

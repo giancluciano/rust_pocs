@@ -9,6 +9,7 @@ mod planning;
 mod research;
 
 use schemars::JsonSchema;
+use schemars::generate::SchemaSettings;
 use swarms_rs::llm::request::ToolDefinition;
 
 pub use curation::{
@@ -43,11 +44,23 @@ pub enum ToolFailure {
     SearchUnavailable(WebSearchError),
 }
 
+/// Tool definition with a flat JSON schema: nested types are inlined instead of
+/// `$ref`-ed and the `$schema` key is dropped, which function-calling APIs
+/// handle more reliably.
 pub(crate) fn definition<T: JsonSchema>(name: &str, description: &str) -> ToolDefinition {
+    let schema = SchemaSettings::draft07()
+        .with(|s| s.inline_subschemas = true)
+        .into_generator()
+        .into_root_schema_for::<T>();
+    let mut parameters = serde_json::to_value(schema).unwrap_or_default();
+    if let Some(object) = parameters.as_object_mut() {
+        object.remove("$schema");
+        object.remove("title");
+    }
     ToolDefinition {
         name: name.to_string(),
         description: description.to_string(),
-        parameters: serde_json::to_value(schemars::schema_for!(T)).unwrap_or_default(),
+        parameters,
     }
 }
 
@@ -87,5 +100,14 @@ mod tests {
         assert_eq!(non_blank(Some("  ".into())), None);
         assert_eq!(non_blank(Some(" a ".into())), Some("a".into()));
         assert_eq!(non_blank(None), None);
+    }
+
+    #[test]
+    fn schemas_are_flat() {
+        let def = definition::<SubmitCandidatesArgs>("submit_candidates", "test");
+        let text = def.parameters.to_string();
+        assert!(!text.contains("$ref"), "{text}");
+        assert!(!text.contains("$schema"), "{text}");
+        assert!(text.contains("\"cities\""), "{text}");
     }
 }

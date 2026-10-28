@@ -36,11 +36,11 @@ const CACHE_TTL: Duration = Duration::from_secs(12 * 3600);
 /// Politeness floor: never faster than one request per second.
 const MIN_INTERVAL_FLOOR: Duration = Duration::from_secs(1);
 const MAX_JITTER: Duration = Duration::from_millis(400);
-/// The request budget covers this many cities per run.
-const MAX_CITIES: u32 = 12;
 
 #[derive(Debug, Clone)]
 pub struct AirbnbConfig {
+    /// Cities searched in one run; sizes the request budget.
+    pub max_cities: u32,
     /// Search result pages fetched per city.
     pub max_pages: u32,
     /// Listing detail pages fetched per city (real capacity, rating, amenities).
@@ -108,7 +108,7 @@ fn airbnb_client(
         min_interval: config.min_interval,
         max_jitter: site.max_jitter,
         // pages and listing details for every city, plus the warm-up request
-        request_budget: per_city * MAX_CITIES + 1,
+        request_budget: per_city * config.max_cities + 1,
         block_detector: looks_blocked,
         cache: Some(cache),
         warmup_url: Some(format!("{}/", site.airbnb_url)),

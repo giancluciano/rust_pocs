@@ -8,7 +8,7 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-dotenv = "0.15"
+dotenvy = "0.15"
 fastrand = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli"] }
 schemars = "1"

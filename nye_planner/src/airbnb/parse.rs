@@ -149,8 +149,16 @@ fn parse_price(result: &Value) -> Option<Price> {
     let qualifier = line.get("qualifier").and_then(Value::as_str).unwrap_or("");
     Some(Price {
         amount,
-        is_total: !qualifier.contains("night"),
+        is_total: !is_nightly(qualifier),
     })
+}
+
+/// "night", "per night", "/ night" quote one night; anything else ("total",
+/// "for 3 nights") is the price of the whole stay.
+fn is_nightly(qualifier: &str) -> bool {
+    let q = qualifier.trim().to_lowercase();
+    let q = q.trim_start_matches("per").trim_start_matches('/').trim();
+    q == "night"
 }
 
 fn parse_hit(result: &Value) -> Option<SearchHit> {
@@ -501,5 +509,15 @@ mod tests {
             parse_listing(&page("{}")),
             Err(AirbnbError::Parse(_))
         ));
+    }
+
+    #[test]
+    fn only_explicit_per_night_qualifiers_are_nightly() {
+        for q in ["night", "per night", "/ night", "/night", " Night "] {
+            assert!(is_nightly(q), "{q}");
+        }
+        for q in ["total", "for 3 nights", "3 nights", ""] {
+            assert!(!is_nightly(q), "{q}");
+        }
     }
 }

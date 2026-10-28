@@ -54,15 +54,18 @@ fn city_section(plan: &CityPlan, people: u32) -> String {
 fn evidence_text(evidence: &FireworksEvidence) -> String {
     let summary = one_line(&evidence.summary);
     match (&evidence.source_url, &evidence.source_title) {
-        (Some(url), Some(title)) => format!("{summary} ([{}]({url}))", link_text(title)),
-        (Some(url), None) => format!("{summary} ([source]({url}))"),
+        (Some(url), Some(title)) => format!("{summary} ([{}]({}))", link_text(title), link_url(url)),
+        (Some(url), None) => format!("{summary} ([source]({}))", link_url(url)),
         (None, _) => summary,
     }
 }
 
 fn stays_table(plan: &CityPlan, people: u32) -> String {
     if plan.stays.is_empty() {
-        return "No Airbnb stays found.".to_string();
+        return match &plan.airbnb_error {
+            Some(error) => format!("Airbnb search failed: {}", one_line(error)),
+            None => "No Airbnb stays found.".to_string(),
+        };
     }
     let rows = plan.stays.iter().map(|(l, reason)| stay_row(l, reason, people));
     std::iter::once(TABLE_HEADER.to_string()).chain(rows).collect::<Vec<_>>().join("\n")
@@ -73,7 +76,7 @@ fn stay_row(listing: &Listing, reason: &str, people: u32) -> String {
         .rating
         .map_or_else(|| "-".to_string(), |r| format!("{r:.2} ({})", listing.review_count));
     let cells = [
-        format!("[{}]({})", cell(&link_text(&listing.name)), listing.url),
+        format!("[{}]({})", cell(&link_text(&listing.name)), link_url(&listing.url)),
         listing.max_guests.to_string(),
         listing.bedrooms.to_string(),
         format!("{} {:.0}", cell(&listing.currency), listing.price_per_person_per_night(people)),
@@ -87,7 +90,7 @@ fn stay_row(listing: &Listing, reason: &str, people: u32) -> String {
 fn unconfirmed_section(unconfirmed: &[FireworksEvidence]) -> String {
     let items = unconfirmed
         .iter()
-        .map(|e| format!("- **{}**: {}", e.city, evidence_text(e)))
+        .map(|e| format!("- **{}**: {}", link_text(&e.city), evidence_text(e)))
         .collect::<Vec<_>>()
         .join("\n");
     format!("## Cities without a confirmed show\n\n{items}")
@@ -105,6 +108,22 @@ fn cell(text: &str) -> String {
 /// Safe inside `[...]`.
 fn link_text(text: &str) -> String {
     one_line(text).replace('[', "(").replace(']', ")")
+}
+
+/// Safe inside `(...)`: characters that would end or break the link are percent-encoded.
+fn link_url(url: &str) -> String {
+    url.trim()
+        .chars()
+        .map(|c| match c {
+            ' ' => "%20".to_string(),
+            '(' => "%28".to_string(),
+            ')' => "%29".to_string(),
+            '<' => "%3C".to_string(),
+            '>' => "%3E".to_string(),
+            '|' => "%7C".to_string(),
+            c => c.to_string(),
+        })
+        .collect()
 }
 
 /// `<dir>/<region-slug>_<checkin>.md`, creating `dir` if needed.
@@ -201,6 +220,7 @@ mod tests {
             fireworks: evidence(name, true),
             notes: notes.map(String::from),
             stays,
+            airbnb_error: None,
         }
     }
 
@@ -268,5 +288,19 @@ mod tests {
         let path = write_report(&out, &request("Santa Catarina"), "# hi\n").unwrap();
         assert_eq!(path, out.join("santa-catarina_2026-12-30.md"));
         assert_eq!(std::fs::read_to_string(path).unwrap(), "# hi\n");
+    }
+
+    #[test]
+    fn link_urls_cannot_break_out_of_the_link() {
+        assert_eq!(link_url(" https://a.example/x (1) "), "https://a.example/x%20%281%29");
+    }
+
+    #[test]
+    fn failed_airbnb_search_is_explained() {
+        let mut failed = plan("Penha", vec![], None);
+        failed.airbnb_error = Some("blocked by\ncaptcha".into());
+        let md = city_section(&failed, 8);
+        assert!(md.contains("Airbnb search failed: blocked by captcha"));
+        assert!(!md.contains("No Airbnb stays found"));
     }
 }
