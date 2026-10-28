@@ -115,7 +115,10 @@ async fn main() -> Result<()> {
         for (city, _) in &confirmed {
             match airbnb.search_city(&city.full_name(), &request.stay, request.people).await {
                 Ok(listings) => state.set_listings(&city.name, listings),
-                Err(e) => tracing::warn!(city = %city.name, error = %e, "Airbnb search failed"),
+                Err(e) => {
+                    tracing::warn!(city = %city.name, error = %e, "Airbnb search failed");
+                    state.set_listings(&city.name, Vec::new());
+                }
             }
         }
 

@@ -42,7 +42,8 @@ impl SharedState {
         todo!("core agent")
     }
 
-    /// Final per-city results for the report, in planner order.
+    /// Final per-city results for the report: every city passed to
+    /// `set_listings` (possibly with no listings), in planner order.
     pub fn plans(&self) -> Vec<CityPlan> {
         todo!("core agent")
     }
