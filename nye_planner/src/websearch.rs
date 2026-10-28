@@ -1,5 +1,8 @@
-//! DuckDuckGo web search (HTML endpoint, no API key) and page text fetching.
+//! Web search and page text fetching. Uses the Brave Search API when
+//! `BRAVE_API_KEY` is set, otherwise DuckDuckGo's HTML endpoint (no key, but it
+//! blocks an IP after a handful of searches).
 
+mod brave;
 mod guard;
 mod results;
 mod text;
@@ -17,6 +20,7 @@ use crate::cache::DiskCache;
 use crate::http::{PoliteClient, PoliteConfig};
 
 const DDG_HTML_URL: &str = "https://html.duckduckgo.com/html/";
+const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_REDIRECTS: usize = 5;
@@ -40,11 +44,37 @@ pub enum WebSearchError {
     InvalidUrl(String),
     #[error("refusing to fetch {url}: {reason}")]
     ForbiddenUrl { url: String, reason: String },
+    #[error("invalid configuration: {0}")]
+    Config(String),
+}
+
+/// Where searches go.
+#[derive(Clone)]
+enum Engine {
+    DuckDuckGo,
+    Brave { api_key: String },
+}
+
+impl Engine {
+    fn from_env() -> Self {
+        match std::env::var("BRAVE_API_KEY") {
+            Ok(key) if !key.trim().is_empty() => Self::Brave { api_key: key.trim().to_string() },
+            _ => Self::DuckDuckGo,
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            Self::DuckDuckGo => "duckduckgo",
+            Self::Brave { .. } => "brave",
+        }
+    }
 }
 
 /// Pacing and limits; tests shrink the intervals.
 #[derive(Clone)]
 struct Settings {
+    engine: Engine,
     search_url: String,
     search_interval: Duration,
     page_interval: Duration,
@@ -55,10 +85,16 @@ struct Settings {
 }
 
 impl Settings {
-    fn production() -> Self {
+    fn production(engine: Engine) -> Self {
+        let (search_url, search_interval) = match engine {
+            Engine::DuckDuckGo => (DDG_HTML_URL, Duration::from_secs(2)),
+            // The free plan allows one request per second.
+            Engine::Brave { .. } => (BRAVE_API_URL, Duration::from_millis(1100)),
+        };
         Self {
-            search_url: DDG_HTML_URL.to_string(),
-            search_interval: Duration::from_secs(2),
+            engine,
+            search_url: search_url.to_string(),
+            search_interval,
             page_interval: Duration::from_secs(1),
             search_budget: 200,
             page_budget_per_host: 40,
@@ -82,13 +118,25 @@ pub struct WebSearch {
 }
 
 impl WebSearch {
+    /// Searches with Brave if `BRAVE_API_KEY` is set, DuckDuckGo otherwise.
     pub fn new(cache_dir: &Path) -> Result<Self, WebSearchError> {
-        Self::with_settings(cache_dir, Settings::production())
+        let engine = Engine::from_env();
+        tracing::info!(engine = engine.name(), "web search engine");
+        Self::with_settings(cache_dir, Settings::production(engine))
     }
 
-    /// Test constructor: talks to `search_url`, with near-zero delays and no address check.
+    /// Test constructor: DuckDuckGo at `search_url`, near-zero delays, no address check.
     #[cfg(test)]
     fn for_test(cache_dir: &Path, search_url: &str) -> Result<Self, WebSearchError> {
+        Self::for_test_engine(cache_dir, search_url, Engine::DuckDuckGo)
+    }
+
+    #[cfg(test)]
+    fn for_test_engine(
+        cache_dir: &Path,
+        search_url: &str,
+        engine: Engine,
+    ) -> Result<Self, WebSearchError> {
         Self::with_settings(
             cache_dir,
             Settings {
@@ -96,7 +144,7 @@ impl WebSearch {
                 search_interval: Duration::from_millis(1),
                 page_interval: Duration::from_millis(1),
                 allow_local_urls: true,
-                ..Settings::production()
+                ..Settings::production(engine)
             },
         )
     }
@@ -104,7 +152,7 @@ impl WebSearch {
     fn with_settings(cache_dir: &Path, settings: Settings) -> Result<Self, WebSearchError> {
         let search_cache = DiskCache::new(cache_dir.join("websearch"), CACHE_TTL)?;
         let page_cache = DiskCache::new(cache_dir.join("pages"), CACHE_TTL)?;
-        let search = PoliteClient::new(search_config(&settings, search_cache))?;
+        let search = PoliteClient::new(search_config(&settings, search_cache)?)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 settings,
@@ -126,12 +174,18 @@ impl WebSearch {
             return Ok(Vec::new());
         }
         tracing::info!(query, "web search");
-        let html = self
-            .inner
-            .search
-            .post_form(&self.inner.settings.search_url, &[("q", query)])
-            .await?;
-        let hits = results::parse_results(&html, max_results)?;
+        let settings = &self.inner.settings;
+        let hits = match settings.engine {
+            Engine::DuckDuckGo => {
+                let html = self.inner.search.post_form(&settings.search_url, &[("q", query)]).await?;
+                results::parse_results(&html, max_results)?
+            }
+            Engine::Brave { .. } => {
+                let url = brave::search_url(&settings.search_url, query, max_results)?;
+                let json = self.inner.search.get(&url, None).await?;
+                brave::parse_results(&json, max_results)?
+            }
+        };
         tracing::debug!(query, hits = hits.len(), "web search done");
         Ok(hits)
     }
@@ -170,15 +224,26 @@ fn site_key(url: &reqwest::Url) -> String {
     }
 }
 
-fn search_config(settings: &Settings, cache: DiskCache) -> PoliteConfig {
-    let mut config = PoliteConfig::new("duckduckgo", USER_AGENT);
-    add_browser_headers(&mut config);
+fn search_config(settings: &Settings, cache: DiskCache) -> Result<PoliteConfig, WebSearchError> {
+    let mut config = PoliteConfig::new(settings.engine.name(), USER_AGENT);
+    match &settings.engine {
+        Engine::DuckDuckGo => {
+            add_browser_headers(&mut config);
+            config.block_detector = results::is_block_page;
+        }
+        Engine::Brave { api_key } => {
+            let mut token = HeaderValue::from_str(api_key)
+                .map_err(|_| WebSearchError::Config("BRAVE_API_KEY is not a valid header value".into()))?;
+            token.set_sensitive(true);
+            config.headers.insert("X-Subscription-Token", token);
+            config.headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        }
+    }
     config.min_interval = settings.search_interval;
     config.max_jitter = settings.search_interval / 4;
     config.request_budget = settings.search_budget;
-    config.block_detector = results::is_block_page;
     config.cache = Some(cache);
-    config
+    Ok(config)
 }
 
 fn page_config(settings: &Settings, site: &str, cache: DiskCache) -> PoliteConfig {
@@ -374,5 +439,34 @@ mod tests {
         WebSearch::new(dir.path()).unwrap();
         assert!(dir.path().join("websearch").is_dir());
         assert!(dir.path().join("pages").is_dir());
+    }
+
+    #[tokio::test]
+    async fn brave_engine_sends_token_and_parses_json() {
+        use wiremock::matchers::{header, query_param};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .and(query_param("q", "réveillon fogos"))
+            .and(query_param("count", "2"))
+            .and(header("X-Subscription-Token", "secret-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                r#"{"web":{"results":[{"title":"<strong>Fogos</strong>","url":"https://a.example/1","description":"x"}]}}"#,
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let web = WebSearch::for_test_engine(
+            dir.path(),
+            &format!("{}/res/v1/web/search", server.uri()),
+            Engine::Brave { api_key: "secret-key".into() },
+        )
+        .unwrap();
+
+        let hits = web.search("réveillon fogos", 2).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Fogos");
+        assert_eq!(hits[0].url, "https://a.example/1");
     }
 }
