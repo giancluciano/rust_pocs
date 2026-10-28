@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>swarms-rs in 5 minutes</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --line: #30363d;
+    --text: #e6edf3;
+    --dim: #8b949e;
+    --rust: #f46623;
+    --rust-soft: rgba(244, 102, 35, 0.14);
+    --green: #7ee787;
+    --red: #ff7b72;
+    --blue: #79c0ff;
+    --purple: #d2a8ff;
+    --yellow: #e3b341;
+    --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+
+  /* Slides are authored at 1280x720 and scaled to fit the viewport. */
+  #stage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1280px;
+    height: 720px;
+    transform-origin: center center;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    padding: 64px 80px;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease;
+    background:
+      radial-gradient(circle at 100% 0%, rgba(244, 102, 35, 0.07), transparent 45%),
+      var(--bg);
+  }
+
+  .slide.active { opacity: 1; visibility: visible; }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 20px;
+    color: var(--dim);
+    margin-bottom: 14px;
+  }
+
+  .kicker .prompt { color: var(--green); }
+
+  h1 {
+    font-size: 64px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-weight: 800;
+  }
+
+  h2 {
+    font-size: 46px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    font-weight: 750;
+    margin-bottom: 28px;
+  }
+
+  .accent { color: var(--rust); }
+  .mono { font-family: var(--mono); }
+  .dim { color: var(--dim); }
+
+  .lead {
+    font-size: 26px;
+    line-height: 1.45;
+    color: var(--text);
+    max-width: 1050px;
+  }
+
+  /* ---------- Title ---------- */
+  .title-slide { justify-content: center; }
+  .title-slide h1 { font-size: 96px; }
+  .title-slide .sub { font-size: 32px; color: var(--dim); margin-top: 18px; }
+  .title-slide .byline {
+    margin-top: 56px;
+    font-family: var(--mono);
+    font-size: 22px;
+    color: var(--dim);
+  }
+  .title-slide .byline b { color: var(--text); font-weight: 600; }
+  .cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 0.9em;
+    background: var(--rust);
+    vertical-align: -0.08em;
+    margin-left: 6px;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .title-slide .cursor { animation: none; }
+
+  /* ---------- Concept cards ---------- */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-top: 36px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 26px 26px 28px;
+  }
+  .card .tag {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--rust);
+    margin-bottom: 10px;
+  }
+  .card h3 { font-size: 28px; margin-bottom: 12px; }
+  .card p { font-size: 20px; line-height: 1.45; color: var(--dim); }
+  .card p code, .lead code, li code, td code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    color: var(--blue);
+  }
+
+  /* ---------- Terminal / code window ---------- */
+  .window {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .window-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--dim);
+  }
+  .window-bar i {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--line);
+  }
+  .window-bar i:nth-child(1) { background: #ff5f57; }
+  .window-bar i:nth-child(2) { background: #febc2e; }
+  .window-bar i:nth-child(3) { background: #28c840; }
+  .window-bar span { margin-left: 10px; }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 21px;
+    line-height: 1.55;
+    padding: 22px 28px;
+    white-space: pre;
+    color: var(--text);
+  }
+  .k { color: var(--red); }       /* keyword */
+  .f { color: var(--purple); }    /* function / method */
+  .s { color: var(--green); }     /* string */
+  .t { color: var(--yellow); }    /* type */
+  .c { color: var(--dim); font-style: italic; } /* comment */
+
+  .code-layout pre {
+    font-size: 17px;
+    line-height: 1.45;
+    padding: 18px 24px;
+  }
+  .code-layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 28px;
+    align-items: start;
+  }
+  .callouts { display: flex; flex-direction: column; gap: 18px; padding-top: 8px; }
+  .callout {
+    border-left: 3px solid var(--rust);
+    padding: 4px 0 4px 16px;
+    font-size: 19px;
+    line-height: 1.4;
+    color: var(--dim);
+  }
+  .callout b { color: var(--text); display: block; font-size: 20px; margin-bottom: 2px; }
+
+  /* ---------- Pros / cons ---------- */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    flex: 1;
+  }
+  .col {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 26px 30px;
+  }
+  .col h3 {
+    font-family: var(--mono);
+    font-size: 22px;
+    margin-bottom: 18px;
+  }
+  .col.pros h3 { color: var(--green); }
+  .col.cons h3 { color: var(--red); }
+  .col ul { list-style: none; display: flex; flex-direction: column; gap: 20px; }
+  .col li { font-size: 21px; line-height: 1.4; color: var(--dim); padding-left: 30px; position: relative; }
+  .col li b { color: var(--text); display: block; margin-bottom: 3px; }
+  .col.pros li::before { content: "+"; color: var(--green); }
+  .col.cons li::before { content: "−"; color: var(--red); }
+  .col li::before {
+    position: absolute;
+    left: 0;
+    top: -2px;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 24px;
+  }
+
+  /* ---------- Comparison table ---------- */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 19px;
+    line-height: 1.35;
+  }
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--text);
+    padding-top: 0;
+  }
+  td:first-child {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--dim);
+    width: 170px;
+    padding-top: 15px;
+  }
+  td { color: var(--dim); }
+  th.hl, td.hl {
+    background: var(--rust-soft);
+    color: var(--text);
+  }
+  th.hl { color: var(--rust); border-radius: 10px 10px 0 0; padding-top: 12px; }
+  tr:last-child td { border-bottom: none; }
+  tr:last-child td.hl { border-radius: 0 0 10px 10px; }
+  th:not(.hl) { padding-top: 12px; }
+
+  .compare { table-layout: fixed; font-size: 24px; }
+  .compare th, .compare td { padding: 20px 20px; }
+  .compare td:first-child { width: 190px; font-size: 18px; padding-top: 24px; }
+  .compare th { font-size: 28px; }
+  .compare th .lang {
+    display: block;
+    margin-top: 4px;
+    font-size: 17px;
+    font-weight: 400;
+    color: var(--dim);
+  }
+  .compare .num {
+    font-family: var(--mono);
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .compare .when { font-family: var(--mono); font-size: 14px; color: var(--dim); }
+  .compare .bar {
+    display: block;
+    height: 8px;
+    margin-top: 12px;
+    border-radius: 3px;
+    background: var(--line);
+  }
+  .compare .bar i {
+    display: block;
+    height: 100%;
+    min-width: 3px;
+    border-radius: 3px;
+    background: var(--dim);
+  }
+  .compare td.hl .bar i { background: var(--rust); }
+  .source {
+    margin-top: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--dim);
+  }
+
+  /* ---------- Demo ---------- */
+  .demo-slide { justify-content: center; }
+  .demo-slide h1 { font-size: 96px; }
+
+  /* ---------- Closing ---------- */
+  .closing { justify-content: center; }
+  .closing h1 { font-size: 96px; }
+
+  /* ---------- Chrome: counter, notes, hint ---------- */
+  #counter {
+    position: fixed;
+    right: 20px;
+    bottom: 16px;
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--dim);
+    z-index: 10;
+  }
+  #progress {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    background: var(--rust);
+    transition: width 0.25s ease;
+    z-index: 10;
+  }
+  #notes {
+    position: fixed;
+    left: 50%;
+    bottom: 36px;
+    transform: translateX(-50%);
+    width: min(900px, calc(100vw - 32px));
+    max-height: 42vh;
+    overflow-y: auto;
+    background: rgba(22, 27, 34, 0.97);
+    border: 1px solid var(--rust);
+    border-radius: 12px;
+    padding: 18px 22px;
+    font-size: 17px;
+    line-height: 1.5;
+    color: var(--text);
+    display: none;
+    z-index: 20;
+  }
+  #notes.open { display: block; }
+  #notes .time {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--rust);
+    margin-bottom: 8px;
+  }
+  #notes ul { padding-left: 20px; }
+  #notes li { margin-bottom: 6px; }
+  #hint {
+    position: fixed;
+    left: 20px;
+    bottom: 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--dim);
+    opacity: 0.7;
+    z-index: 10;
+  }
+  .speaker-notes { display: none; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+
+  <!-- 1. Title -->
+  <section class="slide title-slide" data-time="0:00 – 0:10">
+    <div class="kicker"><span class="prompt">$</span> cargo add swarms-rs</div>
+    <h1>swarms<span class="accent">-rs</span><span class="cursor"></span></h1>
+    <p class="sub">Multi-agent LLM orchestration in Rust</p>
+    <p class="byline"><b>Gian</b> · 5 minutes · what it is → pros &amp; cons → alternatives → live demo</p>
+    <div class="speaker-notes">
+      <ul>
+        <li>"In five minutes: what swarms-rs is, what I liked and didn't, how it compares, then a live demo."</li>
+        <li>Move on quickly; the demo needs the time.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 2. What is it -->
+  <section class="slide" data-time="0:10 – 0:45">
+    <div class="kicker"><span class="prompt">$</span> what is swarms-rs?</div>
+    <h2>A Rust framework for LLM agents<br>that work as a <span class="accent">team</span></h2>
+    <div class="cards">
+      <div class="card">
+        <div class="tag">01 · agent</div>
+        <h3>Agent</h3>
+        <p>An LLM plus a system prompt, tools, and a loop with retries. Built with a fluent builder.</p>
+      </div>
+      <div class="card">
+        <div class="tag">02 · tool</div>
+        <h3>Tools</h3>
+        <p>Rust functions the model can call. Arguments are typed structs with a JSON schema. MCP servers work too.</p>
+      </div>
+      <div class="card">
+        <div class="tag">03 · swarm</div>
+        <h3>Workflows</h3>
+        <p>Ready-made team shapes: <code>Sequential</code>, <code>Concurrent</code>, <code>AgentRearrange</code>, <code>DAG</code>, <code>SwarmRouter</code>.</p>
+      </div>
+    </div>
+    <div class="speaker-notes">
+      <ul>
+        <li>One sentence: swarms-rs lets you define LLM agents in Rust and combine them into teams.</li>
+        <li>Three ideas: an <b>agent</b> is a model plus prompt plus tools; <b>tools</b> are typed Rust functions; <b>workflows</b> are prebuilt team shapes (in a row, in parallel, a graph, or a router that picks one).</li>
+        <li>It's the Rust sibling of the Python Swarms project. Still 0.2, so it's young.</li>
+        <li>Any OpenAI-compatible API works through a base URL. I used DeepSeek.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3. What it looks like -->
+  <section class="slide" data-time="0:45 – 1:10">
+    <div class="kicker"><span class="prompt">$</span> cat src/main.rs</div>
+    <h2>Two agents, running in parallel</h2>
+    <div class="code-layout">
+      <div class="window">
+        <div class="window-bar"><i></i><i></i><i></i><span>main.rs</span></div>
+<pre><span class="k">let</span> client = <span class="t">OpenAI</span>::<span class="f">from_url</span>(base_url, api_key)
+    .<span class="f">set_model</span>(<span class="s">"deepseek-chat"</span>);
+
+<span class="k">let</span> researcher = client.<span class="f">agent_builder</span>()
+    .<span class="f">agent_name</span>(<span class="s">"Researcher"</span>)
+    .<span class="f">system_prompt</span>(<span class="s">"Find facts. Never invent data."</span>)
+    .<span class="f">add_tool</span>(<span class="t">SearchTool</span>)
+    .<span class="f">max_loops</span>(<span class="t">3</span>)
+    .<span class="f">build</span>();
+
+<span class="k">let</span> team = <span class="t">ConcurrentWorkflow</span>::<span class="f">builder</span>()
+    .<span class="f">agents</span>(<span class="f">vec!</span>[<span class="t">Box</span>::<span class="f">new</span>(researcher), <span class="t">Box</span>::<span class="f">new</span>(critic)])
+    .<span class="f">build</span>();
+
+<span class="k">let</span> report = team.<span class="f">run</span>(<span class="s">"Compare Rust agent frameworks"</span>).<span class="k">await</span>?;</pre>
+      </div>
+      <div class="callouts">
+        <div class="callout"><b>Builder API</b>Prompt, tools, loops and temperature in one chain.</div>
+        <div class="callout"><b>Typed tools</b><code>SearchTool</code> is a Rust struct; its schema goes to the model.</div>
+        <div class="callout"><b>Async all the way</b>Workflows are Tokio futures; just <code>.await</code>.</div>
+      </div>
+    </div>
+    <div class="speaker-notes">
+      <ul>
+        <li>Point at the builder: this is the whole agent definition.</li>
+        <li><code>add_tool</code> takes a typed tool. The schema comes from the struct, so a wrong argument type fails at compile time, not in production.</li>
+        <li><code>ConcurrentWorkflow</code> runs both agents on the same task in parallel.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 4. Pros & cons -->
+  <section class="slide" data-time="1:10 – 2:10">
+    <div class="kicker"><span class="prompt">$</span> git log --grep="lessons"</div>
+    <h2>Pros &amp; cons, from building the POC</h2>
+    <div class="split">
+      <div class="col pros">
+        <h3>// what worked</h3>
+        <ul>
+          <li><b>Fast and type-safe</b>Tool arguments are Rust structs, so mistakes show up at compile time. Ships as a single binary.</li>
+          <li><b>Multi-agent patterns built in</b>Sequential, concurrent, rearrange, DAG and router. No need to write orchestration from scratch.</li>
+          <li><b>Tokio-native concurrency</b>Agents are async, so two searchers in parallel is just a <code>tokio::join!</code>.</li>
+        </ul>
+      </div>
+      <div class="col cons">
+        <h3>// what hurt</h3>
+        <ul>
+          <li><b>Sparse docs and examples</b>docs.rs plus a handful of examples. I read the crate source to learn the builder options and how tools behave.</li>
+          <li><b>Tool-calling quirks</b>Agents return free text. To get structured data out reliably, I had tools write into shared state and never parsed the model's reply.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="speaker-notes">
+      <ul>
+        <li><b>Pros:</b> for a Rust team it feels at home: typed tools, async, one binary. The workflow types save boilerplate.</li>
+        <li><b>Cons:</b> expect to open the source; the docs won't answer everything.</li>
+        <li>Real example from the POC: workflows hand back text, so for typed results I ran the two searchers with <code>tokio::join!</code> and let each tool write into shared state. The LLM makes judgment calls; the code does the math.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 5. Alternatives -->
+  <section class="slide" data-time="2:10 – 3:05">
+    <div class="kicker"><span class="prompt">$</span> diff swarms-rs rig langgraph</div>
+    <h2>Alternatives</h2>
+    <table class="compare">
+      <thead>
+        <tr>
+          <th></th>
+          <th class="hl">swarms-rs<span class="lang">Rust</span></th>
+          <th>Rig<span class="lang">Rust</span></th>
+          <th>LangGraph<span class="lang">Python · JS/TS</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>github stars</td>
+          <td class="hl"><span class="num">189</span><span class="bar"><i style="width: 0.4%"></i></span></td>
+          <td><span class="num">9.0k</span><span class="bar"><i style="width: 20%"></i></span></td>
+          <td><span class="num">44.1k</span><span class="bar"><i style="width: 100%"></i></span></td>
+        </tr>
+        <tr>
+          <td>multi-agent</td>
+          <td class="hl">Built in, 5 workflow types</td>
+          <td>DIY: compose agents yourself</td>
+          <td>Stateful graphs with checkpoints</td>
+        </tr>
+        <tr>
+          <td>pick it when</td>
+          <td class="hl">Rust + ready-made agent teams</td>
+          <td>Rust + RAG or many providers</td>
+          <td>Complex, long-running flows</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="source">Source: GitHub · 28 Oct 2026</p>
+    <div class="speaker-notes">
+      <ul>
+        <li>Stars tell the story: swarms-rs is tiny, ~230× fewer stars than LangGraph.</li>
+        <li><b>Rig</b> is the other Rust option, ~50× more stars. Broader building blocks (RAG, vector stores, many native providers) but no prebuilt multi-agent shapes; you wire them yourself.</li>
+        <li><b>LangGraph</b> is the mainstream Python choice: past 1.0, huge ecosystem. Trade-off: Python runtime and deployment.</li>
+        <li>If asked about providers: swarms-rs ships OpenAI-compatible and Anthropic; the others support far more.</li>
+        <li>swarms-rs 0.3.0 is out; the POC was built on 0.2.1.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 6. Live demo (the demo itself runs in the terminal) -->
+  <section class="slide demo-slide" data-time="3:05 – 4:50">
+    <div class="kicker"><span class="prompt">$</span> cargo run</div>
+    <h1>Live demo</h1>
+    <div class="speaker-notes">
+      <ul>
+        <li>Switch to the terminal right away. Run the POC, narrate what each agent is doing while it runs, then show the result.</li>
+        <li>Have a recorded run ready in case the API is slow or offline.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 7. Questions -->
+  <section class="slide closing" data-time="4:50 – 5:00">
+    <div class="kicker"><span class="prompt">$</span> exit 0</div>
+    <h1>Questions?<span class="cursor"></span></h1>
+    <div class="speaker-notes">
+      <ul>
+        <li>Thank everyone and open for questions.</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<div id="progress"></div>
+<div id="counter"></div>
+<div id="hint">← → navigate · N notes · P presenter view</div>
+<aside id="notes" aria-live="polite"></aside>
+
+<!-- Presenter view: written into a pop-up window by openPresenter(). -->
+<template id="presenter-template">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      height: 100vh;
+    }
+    .mono { font-family: "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+    #p-title { font-size: 26px; font-weight: 700; }
+    #p-count { color: #8b949e; font-size: 18px; margin-right: 10px; }
+    #p-clock { font-size: 34px; font-weight: 700; color: #f46623; }
+    #p-target { color: #8b949e; font-size: 16px; }
+    #p-notes {
+      flex: 1;
+      overflow-y: auto;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 22px 26px;
+      font-size: 24px;
+      line-height: 1.5;
+    }
+    #p-notes ul { padding-left: 26px; }
+    #p-notes li { margin-bottom: 12px; }
+    #p-notes code { color: #79c0ff; font-size: 0.9em; }
+    footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    #p-next { color: #8b949e; font-size: 18px; }
+    #p-next b { color: #e6edf3; }
+    button {
+      background: #1c2330;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #f46623; }
+  </style>
+  <header>
+    <div><span id="p-count" class="mono"></span><span id="p-title"></span></div>
+    <div><span id="p-target" class="mono"></span> <span id="p-clock" class="mono">0:00</span></div>
+  </header>
+  <section id="p-notes"></section>
+  <footer>
+    <div id="p-next"></div>
+    <div>
+      <button id="p-reset">Reset timer</button>
+      <button id="p-prev">← Prev</button>
+      <button id="p-forward">Next →</button>
+    </div>
+  </footer>
+</template>
+
+<script>
+  (function () {
+    const stage = document.getElementById("stage");
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const progress = document.getElementById("progress");
+    const notes = document.getElementById("notes");
+    const hint = document.getElementById("hint");
+    let current = 0;
+    let presenter = null;
+    let startedAt = Date.now();
+
+    function fit() {
+      const scale = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+      stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    }
+
+    function indexFromHash() {
+      const n = parseInt(location.hash.slice(1), 10);
+      return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
+    }
+
+    function slideTitle(slide) {
+      const heading = slide.querySelector("h1, h2");
+      return heading ? heading.textContent.trim() : "";
+    }
+
+    function notesHtml(slide) {
+      const source = slide.querySelector(".speaker-notes");
+      return source ? source.innerHTML : "<p>No notes.</p>";
+    }
+
+    function render() {
+      slides.forEach((s, i) => s.classList.toggle("active", i === current));
+      counter.textContent = `${current + 1} / ${slides.length}`;
+      progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+
+      const slide = slides[current];
+      notes.innerHTML = `<div class="time">⏱ ${slide.dataset.time || ""}</div>` + notesHtml(slide);
+      renderPresenter();
+    }
+
+    function go(i) {
+      const next = Math.max(0, Math.min(slides.length - 1, i));
+      if (next === current) return;
+      current = next;
+      history.replaceState(null, "", `#${current + 1}`);
+      render();
+    }
+
+    // ---------- Presenter view (pop-up window for a second screen) ----------
+
+    function presenterOpen() {
+      return presenter && !presenter.closed;
+    }
+
+    function renderPresenter() {
+      if (!presenterOpen()) return;
+      const doc = presenter.document;
+      const slide = slides[current];
+      const next = slides[current + 1];
+      doc.getElementById("p-count").textContent = `${current + 1} / ${slides.length}`;
+      doc.getElementById("p-title").textContent = slideTitle(slide);
+      doc.getElementById("p-target").textContent = slide.dataset.time ? `target ${slide.dataset.time} ·` : "";
+      doc.getElementById("p-notes").innerHTML = notesHtml(slide);
+      doc.getElementById("p-next").innerHTML = next
+        ? `Next: <b>${slideTitle(next)}</b>`
+        : "Last slide";
+      doc.title = `Presenter · ${current + 1}/${slides.length}`;
+    }
+
+    function tickClock() {
+      if (!presenterOpen()) return;
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+      presenter.document.getElementById("p-clock").textContent = clock;
+    }
+
+    function openPresenter() {
+      if (presenterOpen()) {
+        presenter.focus();
+        return;
+      }
+      presenter = window.open("", "swarms-presenter", "popup,width=960,height=640");
+      if (!presenter) {
+        alert("The pop-up was blocked. Allow pop-ups for this page, then press P again.");
+        return;
+      }
+      const doc = presenter.document;
+      doc.title = "Presenter";
+      doc.body.innerHTML = "";
+      doc.body.appendChild(doc.importNode(document.getElementById("presenter-template").content, true));
+      doc.addEventListener("keydown", onKey);
+      doc.getElementById("p-prev").addEventListener("click", () => go(current - 1));
+      doc.getElementById("p-forward").addEventListener("click", () => go(current + 1));
+      doc.getElementById("p-reset").addEventListener("click", () => {
+        startedAt = Date.now();
+        tickClock();
+      });
+      startedAt = Date.now();
+      renderPresenter();
+      tickClock();
+    }
+
+    setInterval(tickClock, 1000);
+    window.addEventListener("pagehide", () => {
+      if (presenterOpen()) presenter.close();
+    });
+
+    // ---------- Input ----------
+
+    function onKey(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+        case "PageDown":
+        case " ":
+          e.preventDefault();
+          go(current + 1);
+          break;
+        case "ArrowLeft":
+        case "ArrowUp":
+        case "PageUp":
+          e.preventDefault();
+          go(current - 1);
+          break;
+        case "Home":
+          go(0);
+          break;
+        case "End":
+          go(slides.length - 1);
+          break;
+        case "n":
+        case "N":
+          notes.classList.toggle("open");
+          hint.style.display = "none";
+          break;
+        case "p":
+        case "P":
+          openPresenter();
+          hint.style.display = "none";
+          break;
+      }
+    }
+
+    document.addEventListener("keydown", onKey);
+
+    // Click the left third to go back, anywhere else to go forward.
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("a, #notes")) return;
+      if (window.getSelection().toString()) return;
+      go(e.clientX < window.innerWidth / 3 ? current - 1 : current + 1);
+    });
+
+    window.addEventListener("hashchange", () => {
+      current = indexFromHash();
+      render();
+    });
+    window.addEventListener("resize", fit);
+
+    current = indexFromHash();
+    fit();
+    render();
+  })();
+</script>
+</body>
+</html>
