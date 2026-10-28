@@ -4,6 +4,7 @@
 
 mod brave;
 mod guard;
+mod resolver;
 mod results;
 mod text;
 
@@ -24,6 +25,8 @@ const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_REDIRECTS: usize = 5;
+const MAX_PAGE_BYTES: usize = 2 * 1024 * 1024;
+const PAGE_CONTENT_TYPES: &[&str] = &["text/html", "application/xhtml+xml", "text/plain"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
@@ -261,8 +264,11 @@ fn page_config(settings: &Settings, site: &str, cache: DiskCache) -> PoliteConfi
     config.base_backoff = Duration::from_secs(2);
     config.request_budget = settings.page_budget_per_host;
     config.cache = Some(cache);
+    config.max_body_bytes = Some(MAX_PAGE_BYTES);
+    config.allowed_content_types = Some(PAGE_CONTENT_TYPES);
     if !settings.allow_local_urls {
         config.redirect = Some(vetted_redirects());
+        config.dns_resolver = Some(Arc::new(resolver::PublicOnlyResolver));
     }
     config
 }
@@ -396,6 +402,35 @@ mod tests {
             "Fireworks Midnight show at the harbour."
         );
         assert_eq!(web.fetch_text(&url, 9).await.unwrap(), "Fireworks");
+    }
+
+    #[tokio::test]
+    async fn fetch_text_refuses_huge_and_non_text_pages() {
+        let server = MockServer::start().await;
+        Mock::given(path("/huge"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw("a".repeat(MAX_PAGE_BYTES + 1), "text/html"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(path("/doc.pdf"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw("%PDF-1.7", "application/pdf"))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let web = engine(&server, dir.path());
+
+        let huge = web.fetch_text(&format!("{}/huge", server.uri()), 100).await;
+        assert!(matches!(
+            huge,
+            Err(WebSearchError::Http(HttpError::BodyTooLarge { .. }))
+        ));
+        let pdf = web.fetch_text(&format!("{}/doc.pdf", server.uri()), 100).await;
+        assert!(matches!(
+            pdf,
+            Err(WebSearchError::Http(HttpError::ContentType { .. }))
+        ));
     }
 
     #[tokio::test]

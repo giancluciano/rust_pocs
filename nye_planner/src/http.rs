@@ -8,12 +8,13 @@
 //!
 //! It does not rotate identities, use proxies or solve captchas.
 
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
-use reqwest::{RequestBuilder, StatusCode};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER};
+use reqwest::{RequestBuilder, Response, StatusCode};
 use tokio::sync::{Mutex, OnceCell};
 use tokio::time::Instant;
 
@@ -31,6 +32,10 @@ pub enum HttpError {
     Status { status: u16, url: String },
     #[error("network error: {0}")]
     Network(String),
+    #[error("response from {url} is larger than the {limit} byte limit")]
+    BodyTooLarge { url: String, limit: usize },
+    #[error("{url} returned {content_type}, which is not an accepted content type")]
+    ContentType { url: String, content_type: String },
 }
 
 pub struct PoliteConfig {
@@ -48,6 +53,12 @@ pub struct PoliteConfig {
     pub cache: Option<DiskCache>,
     /// Custom redirect policy (e.g. to vet every hop); reqwest's default if `None`.
     pub redirect: Option<reqwest::redirect::Policy>,
+    /// Abort (and never cache) responses whose decoded body exceeds this many bytes.
+    pub max_body_bytes: Option<usize>,
+    /// Accepted `Content-Type` prefixes; a missing header is accepted. Any if `None`.
+    pub allowed_content_types: Option<&'static [&'static str]>,
+    /// Custom DNS resolver (e.g. to refuse internal addresses); the system one if `None`.
+    pub dns_resolver: Option<Arc<dyn reqwest::dns::Resolve>>,
 }
 
 impl PoliteConfig {
@@ -70,6 +81,9 @@ impl PoliteConfig {
             block_detector: |_| false,
             cache: None,
             redirect: None,
+            max_body_bytes: None,
+            allowed_content_types: None,
+            dns_resolver: None,
         }
     }
 }
@@ -93,6 +107,9 @@ impl PoliteClient {
             .timeout(config.timeout);
         if let Some(policy) = config.redirect.take() {
             builder = builder.redirect(policy);
+        }
+        if let Some(resolver) = config.dns_resolver.take() {
+            builder = builder.dns_resolver2(resolver);
         }
         let client = builder
             .build()
@@ -166,6 +183,28 @@ impl PoliteClient {
             .map(|_| ())
     }
 
+    fn check_content_type(&self, response: &Response) -> Result<(), HttpError> {
+        let Some(allowed) = self.config.allowed_content_types else {
+            return Ok(());
+        };
+        let Some(value) = response.headers().get(CONTENT_TYPE) else {
+            return Ok(());
+        };
+        let content_type = String::from_utf8_lossy(value.as_bytes())
+            .trim()
+            .to_ascii_lowercase();
+        if allowed
+            .iter()
+            .any(|prefix| content_type.starts_with(prefix))
+        {
+            return Ok(());
+        }
+        Err(HttpError::ContentType {
+            url: response.url().to_string(),
+            content_type,
+        })
+    }
+
     fn check_blocked(&self) -> Result<(), HttpError> {
         match self
             .blocked
@@ -233,7 +272,7 @@ impl PoliteClient {
             let response = match build().send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    last_error = HttpError::Network(e.to_string());
+                    last_error = network_error(&e);
                     self.pause_all(self.backoff(attempt, None)).await;
                     continue;
                 }
@@ -245,10 +284,8 @@ impl PoliteClient {
 
             match status {
                 s if s.is_success() => {
-                    let body = response
-                        .text()
-                        .await
-                        .map_err(|e| HttpError::Network(e.to_string()))?;
+                    self.check_content_type(&response)?;
+                    let body = read_body(response, self.config.max_body_bytes).await?;
                     if (self.config.block_detector)(&body) {
                         return Err(self.trip_breaker("challenge/captcha page".into()));
                     }
@@ -283,6 +320,40 @@ impl PoliteClient {
         }
         Err(last_error)
     }
+}
+
+/// Reads the decoded body chunk by chunk, giving up as soon as it passes `limit`.
+async fn read_body(mut response: Response, limit: Option<usize>) -> Result<String, HttpError> {
+    let too_large = |response: &Response| HttpError::BodyTooLarge {
+        url: response.url().to_string(),
+        limit: limit.unwrap_or(usize::MAX),
+    };
+    if let (Some(limit), Some(declared)) = (limit, response.content_length())
+        && declared > limit as u64
+    {
+        return Err(too_large(&response));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| network_error(&e))? {
+        if limit.is_some_and(|limit| body.len() + chunk.len() > limit) {
+            return Err(too_large(&response));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+/// `reqwest::Error` hides its cause (a refused redirect, a blocked DNS name) behind
+/// a generic message, so include the whole source chain.
+fn network_error(error: &reqwest::Error) -> HttpError {
+    let mut message = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    HttpError::Network(message)
 }
 
 fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
@@ -479,5 +550,115 @@ mod tests {
         assert_eq!(client.get(&url, None).await.unwrap(), "body");
         assert_eq!(client.get(&url, None).await.unwrap(), "body");
         assert_eq!(client.requests_made(), 2); // warm-up + one real request
+    }
+
+    #[tokio::test]
+    async fn body_over_the_cap_is_rejected_and_not_cached() {
+        let server = MockServer::start().await;
+        Mock::given(path("/big"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("x".repeat(101)))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let client = PoliteClient::new(PoliteConfig {
+            max_body_bytes: Some(100),
+            cache: Some(DiskCache::new(dir.path(), Duration::from_secs(60)).unwrap()),
+            ..config("test")
+        })
+        .unwrap();
+        let url = format!("{}/big", server.uri());
+
+        for _ in 0..2 {
+            assert!(matches!(
+                client.get(&url, None).await,
+                Err(HttpError::BodyTooLarge { limit: 100, .. })
+            ));
+        }
+        // both calls reached the server: the aborted body never entered the cache
+        assert_eq!(client.requests_made(), 2);
+    }
+
+    #[tokio::test]
+    async fn body_within_the_cap_is_returned() {
+        let server = MockServer::start().await;
+        Mock::given(path("/ok"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("y".repeat(100)))
+            .mount(&server)
+            .await;
+        let client = PoliteClient::new(PoliteConfig {
+            max_body_bytes: Some(100),
+            ..config("test")
+        })
+        .unwrap();
+        let body = client
+            .get(&format!("{}/ok", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(body.len(), 100);
+    }
+
+    #[tokio::test]
+    async fn disallowed_content_type_is_rejected() {
+        let server = MockServer::start().await;
+        Mock::given(path("/bin"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("Content-Type", "application/pdf")
+                    .set_body_bytes(vec![0u8; 10]),
+            )
+            .mount(&server)
+            .await;
+        let client = PoliteClient::new(PoliteConfig {
+            allowed_content_types: Some(&["text/html", "text/plain"]),
+            ..config("test")
+        })
+        .unwrap();
+        let err = client
+            .get(&format!("{}/bin", server.uri()), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, HttpError::ContentType { content_type, .. } if content_type == "application/pdf"),
+            "{err}"
+        );
+        assert!(
+            client.is_available(),
+            "a wrong type must not trip the breaker"
+        );
+    }
+
+    #[tokio::test]
+    async fn allowed_content_type_matches_by_prefix_and_missing_header_passes() {
+        let server = MockServer::start().await;
+        Mock::given(path("/html"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw("<p>hi</p>", "Text/HTML; charset=UTF-8"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(path("/none"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"raw".to_vec()))
+            .mount(&server)
+            .await;
+        let client = PoliteClient::new(PoliteConfig {
+            allowed_content_types: Some(&["text/html"]),
+            ..config("test")
+        })
+        .unwrap();
+        assert_eq!(
+            client
+                .get(&format!("{}/html", server.uri()), None)
+                .await
+                .unwrap(),
+            "<p>hi</p>"
+        );
+        assert_eq!(
+            client
+                .get(&format!("{}/none", server.uri()), None)
+                .await
+                .unwrap(),
+            "raw"
+        );
     }
 }
