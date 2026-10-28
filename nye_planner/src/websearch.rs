@@ -190,6 +190,12 @@ impl WebSearch {
         Ok(hits)
     }
 
+    /// False once the search engine blocked us or the search budget ran out;
+    /// every later search fails fast.
+    pub fn search_available(&self) -> bool {
+        self.inner.search.is_available()
+    }
+
     /// Visible text of a web page, truncated to `max_chars`.
     pub async fn fetch_text(&self, url: &str, max_chars: usize) -> Result<String, WebSearchError> {
         let parsed = if self.inner.settings.allow_local_urls {

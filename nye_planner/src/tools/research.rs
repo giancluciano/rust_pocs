@@ -1,5 +1,8 @@
 //! Tools of the fireworks researcher.
 
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 use swarms_rs::llm::request::ToolDefinition;
@@ -8,12 +11,43 @@ use swarms_rs::structs::tool::Tool;
 use super::{DONE_MARKER, ToolFailure, definition, non_blank, truncate_chars};
 use crate::domain::{CandidateCity, FireworksEvidence};
 use crate::state::SharedState;
-use crate::websearch::{SearchHit, WebSearch};
+use crate::http::HttpError;
+use crate::websearch::{SearchHit, WebSearch, WebSearchError};
 
 const DEFAULT_RESULTS: usize = 5;
 const MAX_RESULTS: usize = 8;
 const MAX_PAGE_CHARS: usize = 6000;
 const MAX_SUMMARY_CHARS: usize = 500;
+
+/// URLs one researcher got from `web_search` or read with `read_page`. A
+/// confirmed verdict must cite one of them, so the model cannot cite a URL
+/// from memory.
+#[derive(Debug, Clone, Default)]
+pub struct SeenUrls(Arc<Mutex<HashSet<String>>>);
+
+impl SeenUrls {
+    fn add(&self, url: &str) {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).insert(normalize_url(url));
+    }
+
+    fn contains(&self, url: &str) -> bool {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).contains(&normalize_url(url))
+    }
+}
+
+fn normalize_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_lowercase()
+}
+
+/// Blocked or out-of-budget search will not recover during this run.
+fn search_failure(err: WebSearchError) -> ToolFailure {
+    match err {
+        WebSearchError::Http(HttpError::Blocked { .. } | HttpError::BudgetExhausted { .. }) => {
+            ToolFailure::SearchUnavailable(err)
+        }
+        other => ToolFailure::Web(other),
+    }
+}
 
 // ---------------------------------------------------------------- web_search
 
@@ -29,11 +63,12 @@ pub struct WebSearchArgs {
 #[derive(Clone)]
 pub struct WebSearchTool {
     web: WebSearch,
+    seen: SeenUrls,
 }
 
 impl WebSearchTool {
-    pub fn new(web: WebSearch) -> Self {
-        Self { web }
+    pub fn new(web: WebSearch, seen: SeenUrls) -> Self {
+        Self { web, seen }
     }
 }
 
@@ -60,7 +95,13 @@ impl Tool for WebSearchTool {
             return Err(ToolFailure::Invalid("The query is empty. Send a search query.".into()));
         }
         tracing::info!(query, "web_search called");
-        Ok(self.web.search(query, result_limit(args.max_results)).await?)
+        let hits = self
+            .web
+            .search(query, result_limit(args.max_results))
+            .await
+            .map_err(search_failure)?;
+        hits.iter().for_each(|hit| self.seen.add(&hit.url));
+        Ok(hits)
     }
 }
 
@@ -75,11 +116,12 @@ pub struct ReadPageArgs {
 #[derive(Clone)]
 pub struct ReadPageTool {
     web: WebSearch,
+    seen: SeenUrls,
 }
 
 impl ReadPageTool {
-    pub fn new(web: WebSearch) -> Self {
-        Self { web }
+    pub fn new(web: WebSearch, seen: SeenUrls) -> Self {
+        Self { web, seen }
     }
 }
 
@@ -109,7 +151,9 @@ impl Tool for ReadPageTool {
             )));
         }
         tracing::info!(url, "read_page called");
-        Ok(self.web.fetch_text(url, MAX_PAGE_CHARS).await?)
+        let text = self.web.fetch_text(url, MAX_PAGE_CHARS).await?;
+        self.seen.add(url);
+        Ok(text)
     }
 }
 
@@ -136,11 +180,12 @@ pub struct SubmitFireworksArgs {
 pub struct SubmitFireworksTool {
     state: SharedState,
     city: CandidateCity,
+    seen: SeenUrls,
 }
 
 impl SubmitFireworksTool {
-    pub fn new(state: SharedState, city: CandidateCity) -> Self {
-        Self { state, city }
+    pub fn new(state: SharedState, city: CandidateCity, seen: SeenUrls) -> Self {
+        Self { state, city, seen }
     }
 
     fn submit(&self, args: SubmitFireworksArgs) -> Result<String, ToolFailure> {
@@ -163,6 +208,12 @@ impl SubmitFireworksTool {
             return Err(ToolFailure::Invalid(
                 "source_url must be a full http(s) URL from the pages you read.".into(),
             ));
+        }
+        if let Some(url) = source_url.as_deref().filter(|u| args.confirmed && !self.seen.contains(u)) {
+            return Err(ToolFailure::Invalid(format!(
+                "{url} was not returned by web_search or read with read_page. Cite a URL you \
+                 actually found, or set confirmed=false."
+            )));
         }
         if args.confirmed && source_url.is_none() {
             return Err(ToolFailure::Invalid(
@@ -212,7 +263,9 @@ mod tests {
             why: String::new(),
         };
         state.set_candidates(vec![city.clone()]);
-        (SubmitFireworksTool::new(state.clone(), city), state)
+        let seen = SeenUrls::default();
+        seen.add("https://example.com/fogos");
+        (SubmitFireworksTool::new(state.clone(), city, seen), state)
     }
 
     fn args(confirmed: bool, url: Option<&str>) -> SubmitFireworksArgs {
@@ -250,6 +303,35 @@ mod tests {
         assert_eq!(evidence.city, "Bombinhas");
         assert_eq!(evidence.source_url.as_deref(), Some("https://example.com/fogos"));
         assert_eq!(state.confirmed(5).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn confirmed_with_an_unseen_source_is_rejected() {
+        let (tool, state) = tool();
+        let err = tool
+            .call(args(true, Some("https://made-up.example/reveillon")))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not returned by web_search"));
+        assert!(state.fireworks_for("Bombinhas").is_none());
+    }
+
+    #[tokio::test]
+    async fn seen_urls_ignore_case_and_trailing_slash() {
+        let (tool, _) = tool();
+        assert!(tool.call(args(true, Some("HTTPS://example.com/fogos/"))).await.is_ok());
+    }
+
+    #[test]
+    fn blocked_search_is_unavailable_but_other_errors_are_not() {
+        let blocked = WebSearchError::Http(HttpError::Blocked {
+            site: "duckduckgo".into(),
+            reason: "anomaly".into(),
+        });
+        assert!(matches!(search_failure(blocked), ToolFailure::SearchUnavailable(_)));
+        let parse = WebSearchError::Parse("odd page".into());
+        assert!(matches!(search_failure(parse), ToolFailure::Web(_)));
     }
 
     #[tokio::test]

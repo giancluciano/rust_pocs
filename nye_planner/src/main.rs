@@ -107,6 +107,9 @@ async fn main() -> Result<()> {
         .build()
         .run("Find out whether your city announced a New Year's Eve fireworks show.")
         .await?;
+    if !web.search_available() {
+        tracing::warn!("web search was blocked during research: unconfirmed cities may still have a show");
+    }
     let confirmed = state.confirmed(args.max_cities);
     tracing::info!(count = confirmed.len(), "cities with a confirmed show");
 
@@ -123,7 +126,8 @@ async fn main() -> Result<()> {
         }
 
         // 4. The curator picks the stays, then the writer describes each city.
-        SequentialWorkflow::builder()
+        //    If this fails, the report falls back to the cheapest stays.
+        let curated = SequentialWorkflow::builder()
             .name("Curate and write")
             .metadata_output_dir(args.output_dir.join("metadata").to_string_lossy())
             .agents(vec![
@@ -132,7 +136,10 @@ async fn main() -> Result<()> {
             ])
             .build()
             .run(state.curation_brief(&request, args.per_city))
-            .await?;
+            .await;
+        if let Err(e) = curated {
+            tracing::warn!(error = %e, "curate and write failed");
+        }
     }
 
     // 5. Markdown report.

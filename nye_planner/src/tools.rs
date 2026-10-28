@@ -17,8 +17,8 @@ pub use curation::{
 };
 pub use planning::{CityArg, SubmitCandidatesArgs, SubmitCandidatesTool};
 pub use research::{
-    ReadPageArgs, ReadPageTool, SubmitFireworksArgs, SubmitFireworksTool, WebSearchArgs,
-    WebSearchTool,
+    ReadPageArgs, ReadPageTool, SeenUrls, SubmitFireworksArgs, SubmitFireworksTool,
+    WebSearchArgs, WebSearchTool,
 };
 
 use crate::websearch::WebSearchError;
@@ -35,6 +35,12 @@ pub enum ToolFailure {
     Invalid(String),
     #[error("the web request failed ({0}). Try another query or another page.")]
     Web(#[from] WebSearchError),
+    /// Search is blocked or out of budget for the rest of the run.
+    #[error(
+        "web search is unavailable for the rest of this run ({0}). Do not search again: \
+         call submit_fireworks now with confirmed=false and summary \"Web search unavailable\"."
+    )]
+    SearchUnavailable(WebSearchError),
 }
 
 pub(crate) fn definition<T: JsonSchema>(name: &str, description: &str) -> ToolDefinition {

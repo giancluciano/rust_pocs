@@ -13,8 +13,8 @@ use swarms_rs::llm::provider::openai::OpenAI;
 use crate::domain::{CandidateCity, TripRequest};
 use crate::state::SharedState;
 use crate::tools::{
-    DONE_MARKER, GetCityFactsTool, ReadPageTool, SubmitCandidatesTool, SubmitCityNotesTool,
-    SubmitFireworksTool, SubmitPicksTool, WebSearchTool,
+    DONE_MARKER, GetCityFactsTool, ReadPageTool, SeenUrls, SubmitCandidatesTool,
+    SubmitCityNotesTool, SubmitFireworksTool, SubmitPicksTool, WebSearchTool,
 };
 use crate::websearch::WebSearch;
 
@@ -23,9 +23,19 @@ const RETRY_ATTEMPTS: u32 = 2;
 const PLANNER_LOOPS: u32 = 3;
 /// search x3, read x2, submit, plus a retry after a rejected submit.
 const RESEARCHER_LOOPS: u32 = 8;
-/// One loop can hold several tool calls, but a model may go city by city.
-const CURATOR_LOOPS: u32 = 15;
-const WRITER_LOOPS: u32 = 20;
+/// Loops per city for the curator (submit + a retry) and the writer (facts +
+/// notes + a retry): a model may go city by city, one tool call per loop.
+const CURATOR_LOOPS_PER_CITY: u32 = 2;
+const WRITER_LOOPS_PER_CITY: u32 = 3;
+/// Spare loops on top of the per-city ones.
+const SPARE_LOOPS: u32 = 3;
+
+/// Enough loops for every city with listings, which is known by the time the
+/// curator and the writer are built.
+fn loops_for_cities(state: &SharedState, per_city: u32) -> u32 {
+    let cities = u32::try_from(state.listed_cities().len()).unwrap_or(u32::MAX);
+    cities.saturating_mul(per_city).saturating_add(SPARE_LOOPS)
+}
 
 const PLANNER_PROMPT: &str = r#"
 You are a travel planner. Given a region, propose real cities in it that are
@@ -121,10 +131,11 @@ pub fn fireworks_researcher(
     state: SharedState,
 ) -> SwarmsAgent<OpenAI> {
     let name = format!("Fireworks Researcher: {}", city.name);
+    let seen = SeenUrls::default();
     base(llm, &name, researcher_prompt(city, request), RESEARCHER_LOOPS)
-        .add_tool(WebSearchTool::new(web.clone()))
-        .add_tool(ReadPageTool::new(web))
-        .add_tool(SubmitFireworksTool::new(state, city.clone()))
+        .add_tool(WebSearchTool::new(web.clone(), seen.clone()))
+        .add_tool(ReadPageTool::new(web, seen.clone()))
+        .add_tool(SubmitFireworksTool::new(state, city.clone(), seen))
         .build()
 }
 
@@ -141,7 +152,8 @@ fn researcher_prompt(city: &CandidateCity, request: &TripRequest) -> String {
 /// Picks up to `per_city` listings per city with a reason. Tool: `submit_picks`.
 pub fn stay_curator(llm: &OpenAI, state: SharedState, per_city: usize) -> SwarmsAgent<OpenAI> {
     let prompt = CURATOR_PROMPT.replace("{per_city}", &per_city.to_string());
-    base(llm, "Stay Curator", prompt, CURATOR_LOOPS)
+    let loops = loops_for_cities(&state, CURATOR_LOOPS_PER_CITY);
+    base(llm, "Stay Curator", prompt, loops)
         .add_tool(SubmitPicksTool::new(state, per_city))
         .build()
 }
@@ -149,7 +161,8 @@ pub fn stay_curator(llm: &OpenAI, state: SharedState, per_city: usize) -> Swarms
 /// Writes a short paragraph per city from the curator's summary and the
 /// fireworks evidence. Tools: `get_city_facts`, `submit_city_notes`.
 pub fn travel_writer(llm: &OpenAI, state: SharedState) -> SwarmsAgent<OpenAI> {
-    base(llm, "Travel Writer", WRITER_PROMPT.to_string(), WRITER_LOOPS)
+    let loops = loops_for_cities(&state, WRITER_LOOPS_PER_CITY);
+    base(llm, "Travel Writer", WRITER_PROMPT.to_string(), loops)
         .add_tool(GetCityFactsTool::new(state.clone()))
         .add_tool(SubmitCityNotesTool::new(state))
         .build()

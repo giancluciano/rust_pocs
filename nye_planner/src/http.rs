@@ -111,6 +111,11 @@ impl PoliteClient {
         self.requests_made.load(Ordering::Relaxed)
     }
 
+    /// False once the circuit breaker tripped or the request budget ran out.
+    pub fn is_available(&self) -> bool {
+        self.check_blocked().is_ok() && self.requests_made() < self.config.request_budget
+    }
+
     pub async fn get(&self, url: &str, referer: Option<&str>) -> Result<String, HttpError> {
         let key = format!("GET {url}");
         self.cached(&key, || {
