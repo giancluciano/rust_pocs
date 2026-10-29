@@ -10,7 +10,7 @@ whole group, and writes a markdown report.
 # .env
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_API_KEY=...
-BRAVE_API_KEY=...            # recommended, see "Web search" below
+TAVILY_API_KEY=tvly-...      # recommended, see "Web search" below
 # DEEPSEEK_MODEL=deepseek-chat   (optional)
 # OSM_CONTACT=you@example.com    (optional, identifies you to OpenStreetMap)
 
@@ -55,8 +55,10 @@ that fit the group.
 
 ## Web search
 
-- **Brave Search API** when `BRAVE_API_KEY` is set (free plan, 1 request per
-  second). Get a key at https://brave.com/search/api/.
+- **Tavily** when `TAVILY_API_KEY` is set. The free plan has 1,000 searches a
+  month with no credit card; a run uses one to three per candidate city. Get a
+  key at https://app.tavily.com. An invalid key or a used-up plan stops all
+  searches at once, and researchers then report their city as unconfirmed.
 - **DuckDuckGo** HTML endpoint otherwise. No key, but it blocks an IP after a
   handful of searches, which is fewer than one researcher per city needs.
 
@@ -66,7 +68,7 @@ come from the model.
 
 ## Airbnb
 
-Ported from `../swarms_poc`: OpenStreetMap (Nominatim) gives each city's
+Ported from `../../swarms_poc`: OpenStreetMap (Nominatim) gives each city's
 bounding box, then Airbnb's search and listing pages are read from the JSON
 embedded in the HTML. One shared client for all cities: one request per
 second plus jitter, a warm-up visit, a disk cache, a request budget, and a

@@ -27,3 +27,7 @@ wiremock = "0.6"
 
 # Standalone: keeps this crate out of any Cargo workspace in a parent directory.
 [workspace]
+
+# Line numbers in panics without full debug info: keeps target/ small.
+[profile.dev]
+debug = "line-tables-only"

@@ -6,7 +6,7 @@
 //! built-in `task_evaluator` tool is switched off: one fewer tool to confuse
 //! the model, and no early "complete" before the submit.
 
-use chrono::Datelike;
+use chrono::{Datelike, NaiveDate};
 use swarms_rs::agent::{SwarmsAgent, SwarmsAgentBuilder};
 use swarms_rs::llm::provider::openai::OpenAI;
 
@@ -54,18 +54,23 @@ const RESEARCHER_PROMPT: &str = r#"
 You check whether {city} announced a fireworks show for New Year's Eve {eve}
 (the night of December 31, {year}, into {next_year}).
 
+New Year's Eve parties are usually named after the year they WELCOME: the show
+you want is "Réveillon {next_year}", "virada {year}/{next_year}", "chegada de
+{next_year}", "New Year {next_year}". "Réveillon {year}" or "chegada de {year}"
+was LAST year's show (December 31, {last_year}) and does not count.
+
 Rules:
 - Search in the LOCAL language of the city. For Brazil, for example:
-  "réveillon {year} queima de fogos {name}" and "virada {year} {name} fogos".
+  "réveillon {next_year} queima de fogos {name}" and "virada {year}/{next_year} {name} fogos".
 - Use 1 to 3 web_search calls, then read the most promising official or news
   page with read_page.
-- Set confirmed=true ONLY if a source explicitly announces fireworks for THIS
-  New Year's Eve ({year}). Past years do not count, and neither does "it
-  happens every year" without a {year} announcement. Mention such findings in
-  the summary and set confirmed=false.
+- Set confirmed=true ONLY if a source explicitly announces fireworks for the
+  show that welcomes {next_year}. Earlier years do not count, and neither does
+  "it happens every year" without an announcement for {next_year}. Mention
+  such findings in the summary and set confirmed=false.
 - Never guess or invent. No source means confirmed=false.
-- confirmed=true needs source_url, the page that announces the show. The
-  summary says where and when, and who announced it.
+- confirmed=true needs welcomes_year={next_year} and source_url, the page that
+  announces the show. The summary says where and when, and who announced it.
 - Call submit_fireworks exactly once, then stop.
 "#;
 
@@ -135,18 +140,28 @@ pub fn fireworks_researcher(
     base(llm, &name, researcher_prompt(city, request), RESEARCHER_LOOPS)
         .add_tool(WebSearchTool::new(web.clone(), seen.clone()))
         .add_tool(ReadPageTool::new(web, seen.clone()))
-        .add_tool(SubmitFireworksTool::new(state, city.clone(), seen))
+        .add_tool(SubmitFireworksTool::new(state, city.clone(), new_year(request), seen))
         .build()
 }
 
 fn researcher_prompt(city: &CandidateCity, request: &TripRequest) -> String {
-    let eve = request.stay.new_years_eve().unwrap_or_else(|| request.stay.checkin());
+    let eve = new_years_eve(request);
     RESEARCHER_PROMPT
         .replace("{city}", &city.full_name())
         .replace("{name}", &city.name)
         .replace("{eve}", &eve.to_string())
         .replace("{year}", &eve.year().to_string())
-        .replace("{next_year}", &(eve.year() + 1).to_string())
+        .replace("{next_year}", &new_year(request).to_string())
+        .replace("{last_year}", &(eve.year() - 1).to_string())
+}
+
+fn new_years_eve(request: &TripRequest) -> NaiveDate {
+    request.stay.new_years_eve().unwrap_or_else(|| request.stay.checkin())
+}
+
+/// The year that starts at the stay's New Year's Eve midnight.
+fn new_year(request: &TripRequest) -> i32 {
+    new_years_eve(request).year() + 1
 }
 
 /// Picks up to `per_city` listings per city with a reason. Tool: `submit_picks`.
@@ -197,7 +212,9 @@ mod tests {
         let prompt = researcher_prompt(&city(), &request());
         assert!(prompt.contains("Bombinhas, Santa Catarina, Brazil"));
         assert!(prompt.contains("2026-12-31"));
-        assert!(prompt.contains("réveillon 2026 queima de fogos Bombinhas"));
+        // Parties are named after the year they welcome.
+        assert!(prompt.contains("réveillon 2027 queima de fogos Bombinhas"));
+        assert!(prompt.contains("\"Réveillon 2026\" or \"chegada de 2026\"\nwas LAST year's show (December 31, 2025)"));
         assert!(prompt.contains("into 2027"));
         assert!(!prompt.contains('{'), "unfilled placeholder: {prompt}");
     }

@@ -91,6 +91,21 @@ fn total_price_is_divided_by_nights_and_nightly_is_not() {
 }
 
 #[test]
+fn prices_far_below_the_median_are_dropped() {
+    // A campsite quoting one tent among group houses: 125 total vs thousands.
+    let hits = vec![
+        hit("tent", total(125.0)),
+        hit("a", total(4000.0)),
+        hit("b", total(5000.0)),
+        hit("c", total(6000.0)),
+        hit("budget", total(1500.0)),
+    ];
+    let ids: Vec<_> = priced_unique(hits, &stay()).into_iter().map(|(h, _)| h.id).collect();
+    assert_eq!(ids, vec!["budget", "a", "b", "c"]);
+    assert!(priced_unique(vec![], &stay()).is_empty());
+}
+
+#[test]
 fn hits_are_deduped_priced_and_sorted_cheapest_first() {
     let hits = vec![
         hit("dear", total(9000.0)),

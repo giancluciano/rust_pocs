@@ -72,9 +72,11 @@ fn stays_table(plan: &CityPlan, people: u32) -> String {
 }
 
 fn stay_row(listing: &Listing, reason: &str, people: u32) -> String {
-    let rating = listing
-        .rating
-        .map_or_else(|| "-".to_string(), |r| format!("{r:.2} ({})", listing.review_count));
+    let rating = match listing.rating {
+        _ if listing.review_count == 0 => "new".to_string(),
+        Some(r) => format!("{r:.2} ({})", listing.review_count),
+        None => "-".to_string(),
+    };
     let cells = [
         format!("[{}]({})", cell(&link_text(&listing.name)), link_url(&listing.url)),
         listing.max_guests.to_string(),
@@ -262,6 +264,15 @@ mod tests {
         l.amenities = vec![];
         let md = render_markdown(&request("x"), &[plan("Bombinhas", vec![(l, "r".into())], None)], &[]);
         assert!(md.contains("| - | no | r |"));
+    }
+
+    #[test]
+    fn listing_without_reviews_is_new() {
+        let mut l = listing("Casa");
+        l.rating = Some(0.0);
+        l.review_count = 0;
+        let md = render_markdown(&request("x"), &[plan("Bombinhas", vec![(l, "r".into())], None)], &[]);
+        assert!(md.contains("| new |"), "{md}");
     }
 
     #[test]

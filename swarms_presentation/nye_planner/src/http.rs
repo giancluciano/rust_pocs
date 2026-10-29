@@ -2,8 +2,9 @@
 //! - one request at a time per site, at most one per `min_interval` (+ jitter)
 //! - a cookie session, optionally opened with a warm-up page like a browser
 //! - backoff that honours `Retry-After` and pauses *all* callers
-//! - circuit breaker: once the site pushes back (403, repeated 429, captcha),
-//!   every further call fails fast instead of hammering it
+//! - circuit breaker: once the site pushes back (403, repeated 429, captcha, or
+//!   a configured status such as an API's "invalid key"), every further call
+//!   fails fast instead of hammering it
 //! - request budget per run and an optional disk cache
 //!
 //! It does not rotate identities, use proxies or solve captchas.
@@ -50,6 +51,9 @@ pub struct PoliteConfig {
     pub warmup_url: Option<String>,
     /// Returns true if a 200 response is actually a block/captcha page.
     pub block_detector: fn(&str) -> bool,
+    /// Statuses that trip the breaker like a 403, e.g. an API's "invalid key"
+    /// or "quota used up": retrying them can never succeed.
+    pub block_statuses: &'static [u16],
     pub cache: Option<DiskCache>,
     /// Custom redirect policy (e.g. to vet every hop); reqwest's default if `None`.
     pub redirect: Option<reqwest::redirect::Policy>,
@@ -79,6 +83,7 @@ impl PoliteConfig {
             request_budget: 500,
             warmup_url: None,
             block_detector: |_| false,
+            block_statuses: &[],
             cache: None,
             redirect: None,
             max_body_bytes: None,
@@ -148,6 +153,18 @@ impl PoliteClient {
     pub async fn post_form(&self, url: &str, form: &[(&str, &str)]) -> Result<String, HttpError> {
         let key = format!("POST {url} {form:?}");
         self.cached(&key, || self.client.post(url).form(form)).await
+    }
+
+    /// POSTs `body` as JSON. The body is part of the cache key; headers are not.
+    pub async fn post_json(&self, url: &str, body: &str) -> Result<String, HttpError> {
+        let key = format!("POST {url} {body}");
+        self.cached(&key, || {
+            self.client
+                .post(url)
+                .header(CONTENT_TYPE, "application/json")
+                .body(body.to_string())
+        })
+        .await
     }
 
     async fn cached(
@@ -283,6 +300,9 @@ impl PoliteClient {
             tracing::debug!(site = %self.config.site, %url, %status, attempt, "response");
 
             match status {
+                s if self.config.block_statuses.contains(&s.as_u16()) => {
+                    return Err(self.trip_breaker(format!("HTTP {}", s.as_u16())));
+                }
                 s if s.is_success() => {
                     self.check_content_type(&response)?;
                     let body = read_body(response, self.config.max_body_bytes).await?;
@@ -469,6 +489,68 @@ mod tests {
             1,
             "no request after the breaker trips"
         );
+    }
+
+    #[tokio::test]
+    async fn configured_status_trips_breaker() {
+        let server = MockServer::start().await;
+        Mock::given(path("/x"))
+            .respond_with(ResponseTemplate::new(432))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut cfg = config("test");
+        cfg.block_statuses = &[401, 432];
+        let client = PoliteClient::new(cfg).unwrap();
+        let url = format!("{}/x", server.uri());
+
+        for _ in 0..2 {
+            assert!(matches!(
+                client.post_json(&url, "{}").await,
+                Err(HttpError::Blocked { .. })
+            ));
+        }
+        assert!(!client.is_available());
+    }
+
+    #[tokio::test]
+    async fn post_json_sends_body_and_caches_by_body() {
+        use wiremock::matchers::{body_string, header, method};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/search"))
+            .and(header("content-type", "application/json"))
+            .and(body_string(r#"{"q":"a"}"#))
+            .respond_with(ResponseTemplate::new(200).set_body_string("first"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/search"))
+            .and(body_string(r#"{"q":"b"}"#))
+            .respond_with(ResponseTemplate::new(200).set_body_string("second"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config("test");
+        cfg.cache = Some(DiskCache::new(dir.path(), Duration::from_secs(60)).unwrap());
+        let client = PoliteClient::new(cfg).unwrap();
+        let url = format!("{}/search", server.uri());
+
+        assert_eq!(
+            client.post_json(&url, r#"{"q":"a"}"#).await.unwrap(),
+            "first"
+        );
+        assert_eq!(
+            client.post_json(&url, r#"{"q":"b"}"#).await.unwrap(),
+            "second"
+        );
+        assert_eq!(
+            client.post_json(&url, r#"{"q":"a"}"#).await.unwrap(),
+            "first"
+        );
+        assert_eq!(client.requests_made(), 2);
     }
 
     #[tokio::test]

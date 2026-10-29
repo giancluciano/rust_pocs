@@ -396,10 +396,10 @@
     <div class="kicker"><span class="prompt">$</span> cargo add swarms-rs</div>
     <h1>swarms<span class="accent">-rs</span><span class="cursor"></span></h1>
     <p class="sub">Multi-agent LLM orchestration in Rust</p>
-    <p class="byline"><b>Gian</b> · 5 minutes · what it is → pros &amp; cons → alternatives → live demo</p>
+    <p class="byline"><b>Gian</b> · 5 minutes · what it is → pros &amp; cons → alternatives → demo</p>
     <div class="speaker-notes">
       <ul>
-        <li>"In five minutes: what swarms-rs is, what I liked and didn't, how it compares, then a live demo."</li>
+        <li>"In five minutes: what swarms-rs is, what I liked and didn't, how it compares, then a demo."</li>
         <li>Move on quickly; the demo needs the time.</li>
       </ul>
     </div>
@@ -430,7 +430,7 @@
       <ul>
         <li>One sentence: swarms-rs lets you define LLM agents in Rust and combine them into teams.</li>
         <li>Three ideas: an <b>agent</b> is a model plus prompt plus tools; <b>tools</b> are typed Rust functions; <b>workflows</b> are prebuilt team shapes (in a row, in parallel, a graph, or a router that picks one).</li>
-        <li>It's the Rust sibling of the Python Swarms project. Still 0.2, so it's young.</li>
+        <li>It's the Rust sibling of the Python Swarms project. Still 0.3, so it's young.</li>
         <li>Any OpenAI-compatible API works through a base URL. I used DeepSeek.</li>
       </ul>
     </div>
@@ -491,7 +491,8 @@
         <h3>// what hurt</h3>
         <ul>
           <li><b>Sparse docs and examples</b>docs.rs plus a handful of examples. I read the crate source to learn the builder options and how tools behave.</li>
-          <li><b>Tool-calling quirks</b>Agents return free text. To get structured data out reliably, I had tools write into shared state and never parsed the model's reply.</li>
+          <li><b>Tool-calling quirks</b>Agents return free text and don't stop after replying. Tools write into shared state; a stop marker ends each agent.</li>
+          <li><b>Heavy build</b>6k lines of code pulled in 354 crates and 2.6&nbsp;GB of build output.</li>
         </ul>
       </div>
     </div>
@@ -499,7 +500,8 @@
       <ul>
         <li><b>Pros:</b> for a Rust team it feels at home: typed tools, async, one binary. The workflow types save boilerplate.</li>
         <li><b>Cons:</b> expect to open the source; the docs won't answer everything.</li>
-        <li>Real example from the POC: workflows hand back text, so for typed results I ran the two searchers with <code>tokio::join!</code> and let each tool write into shared state. The LLM makes judgment calls; the code does the math.</li>
+        <li>Tool quirks, from the POC: workflows hand back text, so every agent reports through a tool that writes into shared state; the code never parses the model's reply. In 0.3 a text reply doesn't stop the agent either, so the last tool returns a <code>&lt;&lt;DONE&gt;&gt;</code> marker registered as a stop word.</li>
+        <li>Build: most of it is normal for Rust with tokio, reqwest and an HTML parser (193 crates without swarms-rs). swarms-rs adds about 78, including a second TLS library (OpenSSL) and older versions of crates I already use. One <code>Cargo.toml</code> line, <code>debug = "line-tables-only"</code>, took the build folder from 5.5&nbsp;GB to 2.6&nbsp;GB. The binary itself is 12&nbsp;MB.</li>
       </ul>
     </div>
   </section>
@@ -545,7 +547,7 @@
         <li><b>Rig</b> is the other Rust option, ~50× more stars. Broader building blocks (RAG, vector stores, many native providers) but no prebuilt multi-agent shapes; you wire them yourself.</li>
         <li><b>LangGraph</b> is the mainstream Python choice: past 1.0, huge ecosystem. Trade-off: Python runtime and deployment.</li>
         <li>If asked about providers: swarms-rs ships OpenAI-compatible and Anthropic; the others support far more.</li>
-        <li>swarms-rs 0.3.0 is out; the POC was built on 0.2.1.</li>
+        <li>The POC uses swarms-rs 0.3.0.</li>
       </ul>
     </div>
   </section>
@@ -553,11 +555,14 @@
   <!-- 6. Live demo (the demo itself runs in the terminal) -->
   <section class="slide demo-slide" data-time="3:05 – 4:50">
     <div class="kicker"><span class="prompt">$</span> cargo run</div>
-    <h1>Live demo</h1>
+    <h1>Demo</h1>
     <div class="speaker-notes">
       <ul>
-        <li>Switch to the terminal right away. Run the POC, narrate what each agent is doing while it runs, then show the result.</li>
-        <li>Have a recorded run ready in case the API is slow or offline.</li>
+        <li>The POC ran before the talk: a New Year's Eve planner. Input: "the coastline of Santa Catarina", 12 people, Dec 30 – Jan 2.</li>
+        <li>Open <code>src/main.rs</code> and walk the five steps: one planner agent proposes 15 cities → <code>ConcurrentWorkflow</code> runs 15 fireworks researchers in parallel, with web search → plain code searches Airbnb → <code>SequentialWorkflow</code>: curator, then travel writer → Markdown report.</li>
+        <li>Open the report in <code>output/</code>: 3 of 15 cities have a confirmed show, each with its source; 20 stays picked for the group, with reasons.</li>
+        <li>Numbers: about 2.5 minutes, 41 web searches, 77 Airbnb requests.</li>
+        <li>If there's time, one lesson: the first run "confirmed" two cities from last year's announcements. "Réveillon 2026" means Dec 31, 2025. Fixed in the prompt, plus a check in the submit tool.</li>
       </ul>
     </div>
   </section>

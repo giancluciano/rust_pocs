@@ -166,6 +166,10 @@ pub struct SubmitFireworksArgs {
     /// One or two sentences: where and when the show is, and who announced it.
     /// If not confirmed, say what you found (for example only past years).
     pub summary: String,
+    /// The year the show welcomes at midnight, as the source states it
+    /// ("Réveillon 2027" welcomes 2027). Required when confirmed is true.
+    #[serde(default)]
+    pub welcomes_year: Option<i32>,
     /// URL of the page that announces the show. Required when confirmed is true.
     #[serde(default)]
     pub source_url: Option<String>,
@@ -175,17 +179,19 @@ pub struct SubmitFireworksArgs {
 }
 
 /// Records the verdict for ONE city, fixed when the tool is built, so a
-/// researcher cannot report on any other city.
+/// researcher cannot report on any other city. A confirmed show must welcome
+/// `new_year`: last year's announcement is the most common false positive.
 #[derive(Clone)]
 pub struct SubmitFireworksTool {
     state: SharedState,
     city: CandidateCity,
+    new_year: i32,
     seen: SeenUrls,
 }
 
 impl SubmitFireworksTool {
-    pub fn new(state: SharedState, city: CandidateCity, seen: SeenUrls) -> Self {
-        Self { state, city, seen }
+    pub fn new(state: SharedState, city: CandidateCity, new_year: i32, seen: SeenUrls) -> Self {
+        Self { state, city, new_year, seen }
     }
 
     fn submit(&self, args: SubmitFireworksArgs) -> Result<String, ToolFailure> {
@@ -213,6 +219,15 @@ impl SubmitFireworksTool {
             return Err(ToolFailure::Invalid(format!(
                 "{url} was not returned by web_search or read with read_page. Cite a URL you \
                  actually found, or set confirmed=false."
+            )));
+        }
+        if args.confirmed && args.welcomes_year != Some(self.new_year) {
+            let found = args.welcomes_year.map_or("no year".to_string(), |y| y.to_string());
+            return Err(ToolFailure::Invalid(format!(
+                "confirmed=true needs a show that welcomes {new_year} (welcomes_year={new_year}), \
+                 but you sent {found}. An announcement for an earlier New Year's Eve does not \
+                 count: find one for {new_year} or set confirmed=false.",
+                new_year = self.new_year
             )));
         }
         if args.confirmed && source_url.is_none() {
@@ -265,13 +280,14 @@ mod tests {
         state.set_candidates(vec![city.clone()]);
         let seen = SeenUrls::default();
         seen.add("https://example.com/fogos");
-        (SubmitFireworksTool::new(state.clone(), city, seen), state)
+        (SubmitFireworksTool::new(state.clone(), city, 2027, seen), state)
     }
 
     fn args(confirmed: bool, url: Option<&str>) -> SubmitFireworksArgs {
         SubmitFireworksArgs {
             confirmed,
             summary: "Show at Praia de Bombas at midnight.".into(),
+            welcomes_year: Some(2027),
             source_url: url.map(String::from),
             source_title: Some("Prefeitura".into()),
         }
@@ -285,6 +301,21 @@ mod tests {
         let err = tool.call(args(true, Some("  "))).await.unwrap_err().to_string();
         assert!(err.contains("source_url"));
         assert!(state.fireworks_for("Bombinhas").is_none());
+    }
+
+    #[tokio::test]
+    async fn confirmed_for_another_year_is_rejected() {
+        let (tool, state) = tool();
+        for year in [Some(2026), None] {
+            let mut a = args(true, Some("https://example.com/fogos"));
+            a.welcomes_year = year;
+            let err = tool.call(a).await.unwrap_err().to_string();
+            assert!(err.contains("welcomes 2027"), "{err}");
+        }
+        assert!(state.fireworks_for("Bombinhas").is_none());
+        let mut a = args(false, None);
+        a.welcomes_year = Some(2026);
+        assert!(tool.call(a).await.is_ok(), "an unconfirmed verdict needs no year");
     }
 
     #[tokio::test]

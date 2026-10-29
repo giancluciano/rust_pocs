@@ -176,6 +176,10 @@ fn nightly_price(hit: &SearchHit, stay: &Stay) -> Option<f64> {
 
 /// Drops hits without a price and repeated ids (a listing can show up on two
 /// pages), cheapest first.
+/// A nightly price below this share of the city's median is not the group's
+/// price: campsites and hostels quote one tent or bed, whatever the guest count.
+const MIN_SHARE_OF_MEDIAN: f64 = 0.25;
+
 fn priced_unique(hits: Vec<SearchHit>, stay: &Stay) -> Vec<(SearchHit, f64)> {
     let mut seen = HashSet::new();
     let mut priced: Vec<(SearchHit, f64)> = hits
@@ -190,7 +194,25 @@ fn priced_unique(hits: Vec<SearchHit>, stay: &Stay) -> Vec<(SearchHit, f64)> {
         })
         .collect();
     priced.sort_by(|a, b| a.1.total_cmp(&b.1));
-    priced
+    without_implausible_prices(priced)
+}
+
+/// Drops listings priced far below the median of a sorted list.
+fn without_implausible_prices(sorted: Vec<(SearchHit, f64)>) -> Vec<(SearchHit, f64)> {
+    let Some((_, median)) = sorted.get(sorted.len() / 2) else {
+        return sorted;
+    };
+    let floor = median * MIN_SHARE_OF_MEDIAN;
+    sorted
+        .into_iter()
+        .filter(|(hit, price)| {
+            let plausible = *price >= floor;
+            if !plausible {
+                tracing::debug!(id = %hit.id, price, floor, "price too low for the group; skipped");
+            }
+            plausible
+        })
+        .collect()
 }
 
 /// Capacity is only known from a listing page. Without one, the search's

@@ -1,11 +1,11 @@
-//! Web search and page text fetching. Uses the Brave Search API when
-//! `BRAVE_API_KEY` is set, otherwise DuckDuckGo's HTML endpoint (no key, but it
-//! blocks an IP after a handful of searches).
+//! Web search and page text fetching. Uses the Tavily search API when
+//! `TAVILY_API_KEY` is set, otherwise DuckDuckGo's HTML endpoint (no key, but
+//! it blocks an IP after a handful of searches).
 
-mod brave;
 mod guard;
 mod resolver;
 mod results;
+mod tavily;
 mod text;
 
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, HeaderValue};
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, AUTHORIZATION, HeaderValue};
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,9 @@ use crate::cache::DiskCache;
 use crate::http::{PoliteClient, PoliteConfig};
 
 const DDG_HTML_URL: &str = "https://html.duckduckgo.com/html/";
-const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
+const TAVILY_API_URL: &str = "https://api.tavily.com/search";
+/// Tavily: 401 invalid key, 432 plan credits used up, 433 pay-as-you-go limit reached.
+const TAVILY_FATAL_STATUSES: &[u16] = &[401, 432, 433];
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_REDIRECTS: usize = 5;
@@ -55,13 +57,15 @@ pub enum WebSearchError {
 #[derive(Clone)]
 enum Engine {
     DuckDuckGo,
-    Brave { api_key: String },
+    Tavily { api_key: String },
 }
 
 impl Engine {
     fn from_env() -> Self {
-        match std::env::var("BRAVE_API_KEY") {
-            Ok(key) if !key.trim().is_empty() => Self::Brave { api_key: key.trim().to_string() },
+        match std::env::var("TAVILY_API_KEY") {
+            Ok(key) if !key.trim().is_empty() => Self::Tavily {
+                api_key: key.trim().to_string(),
+            },
             _ => Self::DuckDuckGo,
         }
     }
@@ -69,7 +73,7 @@ impl Engine {
     fn name(&self) -> &'static str {
         match self {
             Self::DuckDuckGo => "duckduckgo",
-            Self::Brave { .. } => "brave",
+            Self::Tavily { .. } => "tavily",
         }
     }
 }
@@ -91,8 +95,8 @@ impl Settings {
     fn production(engine: Engine) -> Self {
         let (search_url, search_interval) = match engine {
             Engine::DuckDuckGo => (DDG_HTML_URL, Duration::from_secs(2)),
-            // The free plan allows one request per second.
-            Engine::Brave { .. } => (BRAVE_API_URL, Duration::from_millis(1100)),
+            // Well inside the free plan's rate limit; the quota is per search, not per second.
+            Engine::Tavily { .. } => (TAVILY_API_URL, Duration::from_secs(1)),
         };
         Self {
             engine,
@@ -121,7 +125,7 @@ pub struct WebSearch {
 }
 
 impl WebSearch {
-    /// Searches with Brave if `BRAVE_API_KEY` is set, DuckDuckGo otherwise.
+    /// Searches with Tavily if `TAVILY_API_KEY` is set, DuckDuckGo otherwise.
     pub fn new(cache_dir: &Path) -> Result<Self, WebSearchError> {
         let engine = Engine::from_env();
         tracing::info!(engine = engine.name(), "web search engine");
@@ -180,13 +184,21 @@ impl WebSearch {
         let settings = &self.inner.settings;
         let hits = match settings.engine {
             Engine::DuckDuckGo => {
-                let html = self.inner.search.post_form(&settings.search_url, &[("q", query)]).await?;
+                let html = self
+                    .inner
+                    .search
+                    .post_form(&settings.search_url, &[("q", query)])
+                    .await?;
                 results::parse_results(&html, max_results)?
             }
-            Engine::Brave { .. } => {
-                let url = brave::search_url(&settings.search_url, query, max_results)?;
-                let json = self.inner.search.get(&url, None).await?;
-                brave::parse_results(&json, max_results)?
+            Engine::Tavily { .. } => {
+                let body = tavily::request_body(query, max_results)?;
+                let json = self
+                    .inner
+                    .search
+                    .post_json(&settings.search_url, &body)
+                    .await?;
+                tavily::parse_results(&json, max_results)?
             }
         };
         tracing::debug!(query, hits = hits.len(), "web search done");
@@ -240,12 +252,16 @@ fn search_config(settings: &Settings, cache: DiskCache) -> Result<PoliteConfig, 
             add_browser_headers(&mut config);
             config.block_detector = results::is_block_page;
         }
-        Engine::Brave { api_key } => {
-            let mut token = HeaderValue::from_str(api_key)
-                .map_err(|_| WebSearchError::Config("BRAVE_API_KEY is not a valid header value".into()))?;
+        Engine::Tavily { api_key } => {
+            let mut token = HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|_| {
+                WebSearchError::Config("TAVILY_API_KEY is not a valid header value".into())
+            })?;
             token.set_sensitive(true);
-            config.headers.insert("X-Subscription-Token", token);
-            config.headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+            config.headers.insert(AUTHORIZATION, token);
+            config
+                .headers
+                .insert(ACCEPT, HeaderValue::from_static("application/json"));
+            config.block_statuses = TAVILY_FATAL_STATUSES;
         }
     }
     config.min_interval = settings.search_interval;
@@ -426,7 +442,9 @@ mod tests {
             huge,
             Err(WebSearchError::Http(HttpError::BodyTooLarge { .. }))
         ));
-        let pdf = web.fetch_text(&format!("{}/doc.pdf", server.uri()), 100).await;
+        let pdf = web
+            .fetch_text(&format!("{}/doc.pdf", server.uri()), 100)
+            .await;
         assert!(matches!(
             pdf,
             Err(WebSearchError::Http(HttpError::ContentType { .. }))
@@ -482,32 +500,61 @@ mod tests {
         assert!(dir.path().join("pages").is_dir());
     }
 
+    fn tavily(server: &MockServer, dir: &Path) -> WebSearch {
+        WebSearch::for_test_engine(
+            dir,
+            &format!("{}/search", server.uri()),
+            Engine::Tavily {
+                api_key: "tvly-secret".into(),
+            },
+        )
+        .unwrap()
+    }
+
     #[tokio::test]
-    async fn brave_engine_sends_token_and_parses_json() {
-        use wiremock::matchers::{header, query_param};
+    async fn tavily_engine_sends_key_and_parses_json() {
+        use wiremock::matchers::header;
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/res/v1/web/search"))
-            .and(query_param("q", "réveillon fogos"))
-            .and(query_param("count", "2"))
-            .and(header("X-Subscription-Token", "secret-key"))
+        Mock::given(method("POST"))
+            .and(path("/search"))
+            .and(header("authorization", "Bearer tvly-secret"))
+            .and(body_string_contains(r#""query":"réveillon fogos""#))
+            .and(body_string_contains(r#""max_results":2"#))
             .respond_with(ResponseTemplate::new(200).set_body_string(
-                r#"{"web":{"results":[{"title":"<strong>Fogos</strong>","url":"https://a.example/1","description":"x"}]}}"#,
+                r#"{"results":[{"title":"Fogos","url":"https://a.example/1","content":"x"}]}"#,
             ))
             .expect(1)
             .mount(&server)
             .await;
         let dir = tempfile::tempdir().unwrap();
-        let web = WebSearch::for_test_engine(
-            dir.path(),
-            &format!("{}/res/v1/web/search", server.uri()),
-            Engine::Brave { api_key: "secret-key".into() },
-        )
-        .unwrap();
+        let web = tavily(&server, dir.path());
 
         let hits = web.search("réveillon fogos", 2).await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "Fogos");
         assert_eq!(hits[0].url, "https://a.example/1");
+    }
+
+    #[tokio::test]
+    async fn tavily_quota_or_bad_key_stops_all_searches() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(432).set_body_string(r#"{"detail":{"error":"limit"}}"#),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let web = tavily(&server, dir.path());
+
+        for query in ["a", "b"] {
+            let err = web.search(query, 5).await.unwrap_err();
+            assert!(
+                matches!(err, WebSearchError::Http(HttpError::Blocked { .. })),
+                "{err}"
+            );
+        }
+        assert!(!web.search_available());
     }
 }
