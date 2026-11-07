@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::domain::{CityPlan, FireworksEvidence, Listing, TripRequest};
+use crate::domain::{CityPlan, FireworksEvidence, Listing, Stay, TripRequest};
 
 const TABLE_HEADER: &str = "| Stay | Guests | Bedrooms | Price / person / night | Rating | Pool | Why |\n\
                             |---|---:|---:|---:|---|---|---|";
@@ -16,7 +16,7 @@ pub fn render_markdown(
     unconfirmed: &[FireworksEvidence],
 ) -> String {
     let mut blocks = vec![header(request, plans.len(), unconfirmed.len())];
-    blocks.extend(plans.iter().map(|plan| city_section(plan, request.people)));
+    blocks.extend(plans.iter().map(|plan| city_section(plan, request)));
     if !unconfirmed.is_empty() {
         blocks.push(unconfirmed_section(unconfirmed));
     }
@@ -38,7 +38,7 @@ fn header(request: &TripRequest, shown: usize, unconfirmed: usize) -> String {
     )
 }
 
-fn city_section(plan: &CityPlan, people: u32) -> String {
+fn city_section(plan: &CityPlan, request: &TripRequest) -> String {
     let mut parts = vec![
         format!("## {}", plan.city.full_name()),
         format!("**Fireworks:** {}", evidence_text(&plan.fireworks)),
@@ -46,7 +46,7 @@ fn city_section(plan: &CityPlan, people: u32) -> String {
     if let Some(notes) = plan.notes.as_deref().filter(|n| !n.trim().is_empty()) {
         parts.push(notes.trim().to_string());
     }
-    parts.push(stays_table(plan, people));
+    parts.push(stays_table(plan, request));
     parts.join("\n\n")
 }
 
@@ -60,25 +60,30 @@ fn evidence_text(evidence: &FireworksEvidence) -> String {
     }
 }
 
-fn stays_table(plan: &CityPlan, people: u32) -> String {
+fn stays_table(plan: &CityPlan, request: &TripRequest) -> String {
     if plan.stays.is_empty() {
         return match &plan.airbnb_error {
             Some(error) => format!("Airbnb search failed: {}", one_line(error)),
             None => "No Airbnb stays found.".to_string(),
         };
     }
-    let rows = plan.stays.iter().map(|(l, reason)| stay_row(l, reason, people));
+    let rows = plan.stays.iter().map(|(l, reason)| stay_row(l, reason, request));
     std::iter::once(TABLE_HEADER.to_string()).chain(rows).collect::<Vec<_>>().join("\n")
 }
 
-fn stay_row(listing: &Listing, reason: &str, people: u32) -> String {
+fn stay_row(listing: &Listing, reason: &str, request: &TripRequest) -> String {
+    let people = request.people;
     let rating = match listing.rating {
         _ if listing.review_count == 0 => "new".to_string(),
         Some(r) => format!("{r:.2} ({})", listing.review_count),
         None => "-".to_string(),
     };
     let cells = [
-        format!("[{}]({})", cell(&link_text(&listing.name)), link_url(&listing.url)),
+        format!(
+            "[{}]({})",
+            cell(&link_text(&listing.name)),
+            link_url(&booking_url(&listing.url, &request.stay, people))
+        ),
         listing.max_guests.to_string(),
         listing.bedrooms.to_string(),
         format!("{} {:.0}", cell(&listing.currency), listing.price_per_person_per_night(people)),
@@ -87,6 +92,18 @@ fn stay_row(listing: &Listing, reason: &str, people: u32) -> String {
         cell(reason),
     ];
     format!("| {} |", cells.join(" | "))
+}
+
+/// The listing URL with the stay's dates and the group size, so the Airbnb
+/// page opens with check-in, check-out and guests already filled in.
+fn booking_url(url: &str, stay: &Stay, people: u32) -> String {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!(
+        "{}{separator}check_in={}&check_out={}&adults={people}",
+        url.trim(),
+        stay.checkin(),
+        stay.checkout()
+    )
 }
 
 fn unconfirmed_section(unconfirmed: &[FireworksEvidence]) -> String {
@@ -242,7 +259,7 @@ mod tests {
         assert!(md.contains("Great show."));
         assert!(md.contains("| Stay | Guests | Bedrooms | Price / person / night | Rating | Pool | Why |"));
         assert!(md.contains(
-            "| [Casa Azul](https://airbnb.com/rooms/1) | 10 | 4 | BRL 100 | 4.87 (31) | yes | Pool and space |"
+            "| [Casa Azul](https://airbnb.com/rooms/1?check_in=2026-12-30&check_out=2027-01-02&adults=8) | 10 | 4 | BRL 100 | 4.87 (31) | yes | Pool and space |"
         ));
         assert!(md.contains("## Penha, Santa Catarina, Brazil"));
         assert!(md.contains("No Airbnb stays found"));
@@ -302,6 +319,19 @@ mod tests {
     }
 
     #[test]
+    fn stay_links_carry_the_dates_and_group_size() {
+        let stay = Stay::new(date("2026-12-30"), date("2027-01-05")).unwrap();
+        assert_eq!(
+            booking_url("https://www.airbnb.com/rooms/7", &stay, 12),
+            "https://www.airbnb.com/rooms/7?check_in=2026-12-30&check_out=2027-01-05&adults=12"
+        );
+        assert_eq!(
+            booking_url("https://www.airbnb.com/rooms/7?locale=en", &stay, 12),
+            "https://www.airbnb.com/rooms/7?locale=en&check_in=2026-12-30&check_out=2027-01-05&adults=12"
+        );
+    }
+
+    #[test]
     fn link_urls_cannot_break_out_of_the_link() {
         assert_eq!(link_url(" https://a.example/x (1) "), "https://a.example/x%20%281%29");
     }
@@ -310,7 +340,7 @@ mod tests {
     fn failed_airbnb_search_is_explained() {
         let mut failed = plan("Penha", vec![], None);
         failed.airbnb_error = Some("blocked by\ncaptcha".into());
-        let md = city_section(&failed, 8);
+        let md = city_section(&failed, &request("x"));
         assert!(md.contains("Airbnb search failed: blocked by captcha"));
         assert!(!md.contains("No Airbnb stays found"));
     }
